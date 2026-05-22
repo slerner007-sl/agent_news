@@ -20,12 +20,7 @@ def send_message(chat_id: str, text: str, thread_id: str = None) -> bool:
         }
         if thread_id:
             payload["message_thread_id"] = int(thread_id)
-
-        response = requests.post(
-            f"{TG_URL}/sendMessage",
-            json=payload,
-            timeout=10,
-        )
+        response = requests.post(f"{TG_URL}/sendMessage", json=payload, timeout=10)
         response.raise_for_status()
         return True
     except Exception as e:
@@ -45,22 +40,6 @@ def get_unsent_for_today(gosb_id: int) -> list:
         """, (gosb_id,)).fetchall()
 
 
-def format_digest(gosb_name: str, news_items: list) -> str:
-    date_str = datetime.now().strftime("%d.%m.%Y")
-    lines = [
-        f"📰 <b>Дайджест новостей — {gosb_name}</b>",
-        f"<i>{date_str}</i>",
-        "",
-    ]
-    for i, item in enumerate(news_items, 1):
-        lines.append(f"<b>{i}. {item['title']}</b>")
-        lines.append(f"{item['summary']}")
-        lines.append(f"<a href='{item['url']}'>Читать →</a>")
-        lines.append("")
-    lines.append(f"<i>Всего новостей: {len(news_items)}</i>")
-    return "\n".join(lines)
-
-
 def send_digest():
     gosbs = get_active_gosbs()
     print(f"📤 Отправляем дайджест для {len(gosbs)} ГОСБов...\n")
@@ -74,20 +53,27 @@ def send_digest():
             print(f"  ℹ️  Нет новостей для отправки")
             continue
 
-        print(f"  📰 Отправляем {len(news_items)} новостей...")
-        text = format_digest(gosb["name"], news_items)
+        date_str = datetime.now().strftime("%d.%m.%Y")
 
-        if len(text) > 4096:
-            text = text[:4090] + "\n..."
+        # Шапка отдельным сообщением
+        send_message(
+            gosb["chat_id"],
+            f"📰 <b>Дайджест новостей — {gosb['name']}</b>\n<i>{date_str} | {len(news_items)} новостей</i>",
+            gosb["thread_id"]
+        )
 
-        if send_message(gosb["chat_id"], text, gosb["thread_id"]):
-            print(f"  ✅ Отправлено в топик {gosb['thread_id']}")
-        else:
-            print(f"  ❌ Не удалось отправить")
+        # Каждая новость отдельным сообщением
+        for i, item in enumerate(news_items, 1):
+            text = (
+                f"<b>{i}. {item['title']}</b>\n"
+                f"{item['summary']}\n"
+                f"<a href='{item['url']}'>Читать →</a>"
+            )
+            send_message(gosb["chat_id"], text, gosb["thread_id"])
 
-        print()
+        print(f"  ✅ Отправлено {len(news_items)} новостей в топик {gosb['thread_id']}")
 
-    print("✅ Готово")
+    print("\n✅ Готово")
 
 
 if __name__ == "__main__":
