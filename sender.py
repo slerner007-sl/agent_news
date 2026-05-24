@@ -3,6 +3,7 @@ sender.py — отправка с кнопками обратной связи
 """
 
 import requests
+from html import escape
 from datetime import datetime
 from db import get_conn, get_active_gosbs
 
@@ -66,17 +67,21 @@ def send_digest():
             continue
 
         date_str = datetime.now().strftime("%d.%m.%Y")
+        gosb_name = escape(str(gosb["name"]))
         send_message(
             gosb["chat_id"],
-            f"📰 <b>Дайджест — {gosb['name']}</b>\n<i>{date_str} | {len(news_items)} новостей</i>",
+            f"📰 <b>Дайджест — {gosb_name}</b>\n<i>{date_str} | {len(news_items)} новостей</i>",
             gosb["thread_id"]
         )
 
         for i, item in enumerate(news_items, 1):
+            title = escape(str(item["title"]))
+            summary = escape(str(item["summary"] or ""))
+            url = escape(str(item["url"]), quote=True)
             text = (
-                f"<b>{i}. {item['title']}</b>\n"
-                f"{item['summary']}\n"
-                f"<a href='{item['url']}'>Читать →</a>"
+                f"<b>{i}. {title}</b>\n"
+                f"{summary}\n"
+                f"<a href='{url}'>Читать →</a>"
             )
             send_message(
                 gosb["chat_id"],

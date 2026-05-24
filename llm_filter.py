@@ -1,39 +1,117 @@
 """
-llm_filter.py — фильтрация новостей через OpenRouter
+llm_filter.py - news filtering through the local OpenClaw gateway.
 """
 
 import json
-import requests
-from db import get_conn, get_active_gosbs, get_unsent_news, mark_as_sent
+import os
+import subprocess
+from pathlib import Path
+from db import get_active_gosbs, get_unsent_news, mark_as_sent
 
-OPENROUTER_KEY = "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"
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "openai/gpt-4o-mini"  # дёшево и быстро для фильтрации
+OPENCLAW_BIN = os.getenv("OPENCLAW_BIN", "/home/user1/.npm-global/bin/openclaw")
+OPENCLAW_MODEL = os.getenv("OPENCLAW_MODEL", "openai/gpt-5.5")
+OPENCLAW_TIMEOUT = int(os.getenv("OPENCLAW_TIMEOUT", "240"))
+FALLBACK_LIMIT = int(os.getenv("NEWS_FALLBACK_LIMIT", "5"))
+PROJECT_DIR = Path(__file__).resolve().parent
+
+
+def _strip_code_fences(text: str) -> str:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _extract_json(text: str) -> dict:
+    cleaned = _strip_code_fences(text)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        return json.loads(cleaned[start:end + 1])
+
+
+def _openclaw_json(prompt: str) -> dict:
+    result = subprocess.run(
+        [
+            OPENCLAW_BIN,
+            "agent",
+            "--agent", "main",
+            "--model", OPENCLAW_MODEL,
+            "--message", prompt,
+            "--timeout", str(OPENCLAW_TIMEOUT),
+            "--json",
+        ],
+        cwd=PROJECT_DIR,
+        text=True,
+        capture_output=True,
+        timeout=OPENCLAW_TIMEOUT + 30,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(detail[:1000] or f"openclaw exited with {result.returncode}")
+
+    payload = json.loads(result.stdout)
+    meta = payload.get("result", {}).get("meta", {})
+    content = meta.get("finalAssistantVisibleText") or meta.get("finalAssistantRawText")
+    if not content:
+        payloads = payload.get("result", {}).get("payloads", [])
+        if payloads:
+            content = payloads[0].get("text")
+    if not content:
+        raise RuntimeError("openclaw returned no assistant text")
+    return _extract_json(content)
+
+
+def _fallback_relevant(candidates: list) -> list:
+    """Keep the digest alive if the LLM is temporarily unavailable."""
+    relevant = []
+    for news in candidates[:FALLBACK_LIMIT]:
+        body = (news.get("body") or "").strip()
+        summary = body[:220].strip()
+        if len(body) > 220:
+            summary += "..."
+        if not summary:
+            summary = "Новость прошла тематический keyword-фильтр."
+        relevant.append({"news": news, "summary": summary})
+    return relevant
 
 
 def filter_news_for_gosb(gosb: dict, news_items: list) -> list:
-    """Один LLM-вызов на весь список новостей для одного ГОСБа."""
+    """One LLM call for the whole news list for one GOSB."""
     if not news_items:
         return []
 
-    # Keyword pre-filter — бесплатно, сокращает список перед LLM
-    import json as _json
-    keywords = _json.loads(gosb["keywords"])
+    keywords = json.loads(gosb["keywords"])
     candidates = [
         n for n in news_items
-        if any(kw.lower() in (n["title"] + " " + (n["body"] or "")).lower()
-               for kw in keywords)
+        if any(
+            kw.lower() in (n["title"] + " " + (n["body"] or "")).lower()
+            for kw in keywords
+        )
     ]
 
     if not candidates:
-        print(f"  ℹ️  После keyword-фильтра: 0 кандидатов")
+        print("  ℹ️  После keyword-фильтра: 0 кандидатов")
         return []
 
     print(f"  📋 Keyword-фильтр: {len(news_items)} → {len(candidates)} кандидатов")
 
-    # Формируем список для LLM
     news_list = "\n".join([
-        f"[{i}] {n['title']}"
+        (
+            f"[{i}] {n['title']}\n"
+            f"Источник: {n.get('source') or '-'}\n"
+            f"Текст: {(n.get('body') or '')[:700]}"
+        )
         for i, n in enumerate(candidates)
     ])
 
@@ -42,50 +120,35 @@ def filter_news_for_gosb(gosb: dict, news_items: list) -> list:
 Вот список новостей:
 {news_list}
 
-Ответь ТОЛЬКО валидным JSON, без markdown:
-{{"relevant": [{{"index": 0, "summary": "..."}}]}}"""
+Верни только валидный JSON без markdown и пояснений.
+Схема ответа строго такая:
+{{"relevant": [{{"index": 0, "summary": "почему это важно для банка"}}]}}
+Если релевантных новостей нет, верни {{"relevant": []}}."""
 
     try:
-        response = requests.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 1000,
-                "temperature": 0.1,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-
-        # Чистим на случай если LLM добавил markdown
-        content = content.strip().replace("```json", "").replace("```", "").strip()
-        result = json.loads(content)
+        result = _openclaw_json(prompt)
 
         relevant = []
         for item in result.get("relevant", []):
-            idx = item["index"]
+            idx = int(item["index"])
             if 0 <= idx < len(candidates):
                 relevant.append({
                     "news": candidates[idx],
-                    "summary": item["summary"],
+                    "summary": str(item.get("summary") or "").strip(),
                 })
 
         print(f"  ✅ LLM отобрал: {len(relevant)} релевантных")
         return relevant
 
     except Exception as e:
-        print(f"  ❌ Ошибка LLM: {e}")
-        return []
+        print(f"  ❌ Ошибка LLM/OpenClaw: {e}")
+        fallback = _fallback_relevant(candidates)
+        print(f"  ⚠️  Fallback: отправим {len(fallback)} новостей после keyword-фильтра")
+        return fallback
 
 
 def run_filter():
-    """Запускает фильтрацию для всех активных ГОСБов."""
+    """Run filtering for all active GOSBs."""
     gosbs = get_active_gosbs()
     print(f"🔍 Фильтруем новости для {len(gosbs)} ГОСБов...\n")
 
@@ -97,7 +160,6 @@ def run_filter():
 
         relevant = filter_news_for_gosb(gosb, news_items)
 
-        # Сохраняем в sent_news
         for item in relevant:
             mark_as_sent(gosb["id"], item["news"]["id"], item["summary"])
 
