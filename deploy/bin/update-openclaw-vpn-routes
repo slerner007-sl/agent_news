@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WG_IF="${WG_IF:-wg0}"
+WG_CONF="${WG_CONF:-/etc/wireguard/${WG_IF}.conf}"
+STATE_DIR="/var/lib/openclaw-vpn-routes"
+STATE_FILE="${STATE_DIR}/chatgpt-routes.txt"
+
+BASE_ALLOWED=(
+  "1.1.1.1/32"
+  "1.0.0.1/32"
+  "149.154.160.0/20"
+  "91.108.4.0/22"
+  "91.108.56.0/22"
+  "91.108.8.0/22"
+  "91.108.16.0/22"
+  "91.108.12.0/22"
+  "8.47.69.0/24"
+  "8.6.112.0/24"
+)
+
+DOMAINS=(
+  "chatgpt.com"
+  "chat.openai.com"
+  "auth.openai.com"
+  "api.openai.com"
+  "platform.openai.com"
+  "cdn.openai.com"
+  "oaistatic.com"
+  "oaiusercontent.com"
+  "files.oaiusercontent.com"
+)
+
+if [[ "$(id -u)" != "0" ]]; then
+  echo "Run as root" >&2
+  exit 1
+fi
+
+if ! ip link show "$WG_IF" >/dev/null 2>&1; then
+  echo "WireGuard interface ${WG_IF} is not available" >&2
+  exit 1
+fi
+
+peer="$(wg show "$WG_IF" peers | head -n 1)"
+if [[ -z "$peer" ]]; then
+  echo "No WireGuard peer found on ${WG_IF}" >&2
+  exit 1
+fi
+
+mkdir -p "$STATE_DIR"
+
+mapfile -t dynamic_allowed < <(
+  for domain in "${DOMAINS[@]}"; do
+    getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}'
+  done \
+    | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {print $1 "/32"}' \
+    | sort -u
+)
+
+# Keep Telegram and resolver routes stable, and add only current ChatGPT/OpenAI IPs.
+all_allowed=("${BASE_ALLOWED[@]}" "${dynamic_allowed[@]}")
+
+# Delete stale dynamic routes from the previous run.
+if [[ -f "$STATE_FILE" ]]; then
+  while read -r old_cidr; do
+    [[ -z "$old_cidr" ]] && continue
+    keep=0
+    for cidr in "${dynamic_allowed[@]}"; do
+      if [[ "$cidr" == "$old_cidr" ]]; then
+        keep=1
+        break
+      fi
+    done
+    if [[ "$keep" == "0" ]]; then
+      ip route del "$old_cidr" dev "$WG_IF" 2>/dev/null || true
+    fi
+  done < "$STATE_FILE"
+fi
+
+for cidr in "${all_allowed[@]}"; do
+  ip route replace "$cidr" dev "$WG_IF"
+done
+
+allowed_csv="$(IFS=,; echo "${all_allowed[*]}")"
+wg set "$WG_IF" peer "$peer" allowed-ips "$allowed_csv"
+
+# Persist the latest split tunnel set for wg-quick restarts.
+if [[ -f "$WG_CONF" ]]; then
+  tmp="$(mktemp)"
+  sed "s#^AllowedIPs = .*#AllowedIPs = ${allowed_csv}#" "$WG_CONF" > "$tmp"
+  install -m 600 "$tmp" "$WG_CONF"
+  rm -f "$tmp"
+fi
+
+printf '%s\n' "${dynamic_allowed[@]}" > "$STATE_FILE"
+
+echo "Updated ${WG_IF}: ${#dynamic_allowed[@]} ChatGPT/OpenAI route(s), ${#BASE_ALLOWED[@]} base route(s)."

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh split VPN routes for ChatGPT/OpenAI and Telegram
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=openclaw-vpn-routes.service
+
+[Install]
+WantedBy=timers.target
