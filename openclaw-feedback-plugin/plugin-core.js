@@ -21,14 +21,6 @@ function cleanCommentText(value) {
   return cleanText(value).replace(/(^|\s)@agent_ler_bot\b[:,\s-]*/gi, "$1").trim();
 }
 
-async function clearButtonsQuietly(ctx) {
-  try {
-    await ctx.respond.clearButtons();
-  } catch {
-    // Telegram can reject button edits for older or already edited messages.
-  }
-}
-
 export async function handleFeedbackCallback(ctx, pluginConfig = {}) {
   const parsed = parseFeedbackCallback(ctx.callback?.data);
   if (!parsed) return { handled: false };
@@ -59,7 +51,6 @@ export async function handleFeedbackCallback(ctx, pluginConfig = {}) {
       return { handled: true };
     }
 
-    await clearButtonsQuietly(ctx);
     await ctx.respond.reply({
       text: "Ответь reply на это сообщение комментарием. Если не сохранится, напиши в чат: @agent_ler_bot твой комментарий.",
     });
@@ -67,15 +58,21 @@ export async function handleFeedbackCallback(ctx, pluginConfig = {}) {
   }
 
   try {
-    await saveFeedback({
+    const result = await saveFeedback({
       dbPath,
       newsId: parsed.newsId,
       userId: senderId,
       username: senderUsername,
       action: parsed.action,
     });
-    await clearButtonsQuietly(ctx);
-    await ctx.respond.reply({ text: `${ACTION_LABELS[parsed.action]} — спасибо за оценку.` });
+
+    if (result.status === "duplicate") {
+      await ctx.respond.reply({ text: `${ACTION_LABELS[parsed.action]} уже учтено.` });
+    } else if (result.status === "updated") {
+      await ctx.respond.reply({ text: `Оценку обновил: ${ACTION_LABELS[parsed.action]}.` });
+    } else {
+      await ctx.respond.reply({ text: `${ACTION_LABELS[parsed.action]} — спасибо за оценку.` });
+    }
   } catch (error) {
     await ctx.respond.reply({
       text: `Не смог сохранить оценку: ${error instanceof Error ? error.message : String(error)}`,

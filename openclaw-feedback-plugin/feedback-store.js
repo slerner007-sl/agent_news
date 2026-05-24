@@ -66,6 +66,43 @@ export async function saveFeedback({ dbPath, newsId, userId, username, action, c
       .prepare("SELECT gosb_id FROM sent_news WHERE news_id = ? ORDER BY sent_at DESC LIMIT 1")
       .get(newsId);
     const gosbId = row && typeof row === "object" ? row.gosb_id : null;
+    const normalizedUserId = String(userId ?? "");
+
+    if (action === "useful" || action === "boring") {
+      const existing = db
+        .prepare(
+          `
+          SELECT id, action
+          FROM feedback
+          WHERE news_id = ?
+            AND user_id = ?
+            AND action IN ('useful', 'boring')
+          ORDER BY id DESC
+          LIMIT 1
+          `,
+        )
+        .get(newsId, normalizedUserId);
+
+      if (existing && typeof existing === "object") {
+        if (existing.action === action) {
+          return { status: "duplicate", action };
+        }
+
+        db.prepare(
+          `
+          UPDATE feedback
+          SET gosb_id = ?,
+              username = ?,
+              action = ?,
+              comment = NULL,
+              created_at = datetime('now')
+          WHERE id = ?
+          `,
+        ).run(gosbId ?? null, String(username ?? ""), action, existing.id);
+        return { status: "updated", previousAction: existing.action, action };
+      }
+    }
+
     db.prepare(
       `
       INSERT INTO feedback (gosb_id, news_id, user_id, username, action, comment)
@@ -74,7 +111,7 @@ export async function saveFeedback({ dbPath, newsId, userId, username, action, c
     ).run(
       gosbId ?? null,
       newsId,
-      String(userId ?? ""),
+      normalizedUserId,
       String(username ?? ""),
       action,
       comment ? String(comment) : null,
@@ -83,7 +120,7 @@ export async function saveFeedback({ dbPath, newsId, userId, username, action, c
     db.close();
   }
 
-  return {};
+  return { status: "inserted", action };
 }
 
 function pendingKey({ accountId, conversationId, senderId }) {

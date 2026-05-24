@@ -79,12 +79,33 @@ try {
     INSERT INTO sent_news (gosb_id, news_id, summary) VALUES (77, 42, 'summary');
   `);
 
-  await saveFeedback({
+  const firstReaction = await saveFeedback({
     dbPath,
     newsId: 42,
     userId: "100",
     username: "stepan",
     action: "useful",
+  });
+  assert.deepEqual(firstReaction, { status: "inserted", action: "useful" });
+  const duplicateReaction = await saveFeedback({
+    dbPath,
+    newsId: 42,
+    userId: "100",
+    username: "stepan",
+    action: "useful",
+  });
+  assert.deepEqual(duplicateReaction, { status: "duplicate", action: "useful" });
+  const updatedReaction = await saveFeedback({
+    dbPath,
+    newsId: 42,
+    userId: "100",
+    username: "stepan",
+    action: "boring",
+  });
+  assert.deepEqual(updatedReaction, {
+    status: "updated",
+    previousAction: "useful",
+    action: "boring",
   });
   await saveFeedback({
     dbPath,
@@ -100,12 +121,11 @@ try {
     .all()
     .map((row) => [row.gosb_id, row.news_id, row.user_id, row.username, row.action, row.comment]);
   assert.deepEqual(rows, [
-    [77, 42, "100", "stepan", "useful", null],
+    [77, 42, "100", "stepan", "boring", null],
     [77, 42, "100", "stepan", "comment", "good item"],
   ]);
 
   const replies = [];
-  let clearedButtons = 0;
   const pluginConfig = {
     dbPath,
     pendingPath: path.join(tempDir, "plugin-pending.json"),
@@ -118,9 +138,7 @@ try {
     senderUsername: "stepan",
     callback: { data: "comment:42" },
     respond: {
-      clearButtons: async () => {
-        clearedButtons += 1;
-      },
+      clearButtons: async () => {},
       reply: async (message) => {
         replies.push(message.text);
       },
@@ -128,7 +146,6 @@ try {
   };
 
   assert.deepEqual(await handleFeedbackCallback(callbackCtx, pluginConfig), { handled: true });
-  assert.equal(clearedButtons, 1);
   assert.equal(replies.length, 1);
   assert.equal(
     replies[0],
