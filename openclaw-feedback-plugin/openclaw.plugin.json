@@ -1,0 +1,27 @@
+{
+  "id": "gosb-feedback",
+  "name": "GOSB News Feedback",
+  "description": "Handles Telegram digest feedback buttons inside OpenClaw polling.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "default": "/home/user1/gosb_bot/data/news_bot.db"
+      },
+      "pendingPath": {
+        "type": "string",
+        "default": "/home/user1/gosb_bot/data/openclaw_feedback_pending.json"
+      },
+      "commentTtlMs": {
+        "type": "number",
+        "minimum": 10000,
+        "default": 600000
+      }
+    }
+  }
+}

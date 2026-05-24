@@ -1,0 +1,18 @@
+{
+  "name": "gosb-openclaw-feedback",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.22",
+      "minGatewayVersion": ">=2026.5.22"
+    }
+  },
+  "scripts": {
+    "test": "node test.mjs"
+  }
+}
