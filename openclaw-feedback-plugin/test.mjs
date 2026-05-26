@@ -18,6 +18,7 @@ import {
   handleFeedbackCallback,
   handleKnowledgeInboundClaim,
   handleKnowledgeMessage,
+  handleMetricsInfoRequest,
   handlePendingComment,
 } from "./plugin-core.js";
 
@@ -215,6 +216,31 @@ try {
     undefined,
   );
 
+  saveKnowledgeDocument({
+    dbPath,
+    kind: "metrics",
+    threadId: "2",
+    sourceType: "file",
+    fileName: "metrics.xlsx",
+    contentText: [
+      "# sheet 1",
+      "Блок | Функция/Роль | Направления | Категория | Наименование метрики | Номер метрики",
+      "metric_block | metric_group | metric_class | metric_category | metric_name | project_id",
+      "Финансы | Управление бизнесом | KPI | Работа с отклонениями | Динамика CIR (всего) | 10000190",
+      "Рынок | B2B | Доля рынка | Позиция | Доля рынка КЮЛ | 10000200",
+    ].join("\n"),
+    sourceKey: "metrics.xlsx",
+    contentHash: "metrics-command-hash",
+  });
+  const metricsInfoResult = await handleMetricsInfoRequest(
+    { channel: "telegram", content: "/metrics@agent_ler_bot" },
+    { conversationId: "-1001:topic:39" },
+    pluginConfig,
+  );
+  assert.equal(metricsInfoResult.handled, true);
+  assert.match(metricsInfoResult.text, /metrics\.xlsx, 2 метрик/);
+  assert.match(metricsInfoResult.text, /10000190 — Динамика CIR/);
+
   const metricsResult = await handleKnowledgeMessage(
     { channel: "telegram", content: "Доля просрочки = просроченная задолженность / кредитный портфель" },
     { conversationId: "-1001:topic:2", senderId: "100", senderUsername: "stepan" },
@@ -241,7 +267,7 @@ try {
   );
 
   const knowledgeRows = db
-    .prepare("SELECT kind, thread_id, content_text FROM knowledge_documents ORDER BY id")
+    .prepare("SELECT kind, thread_id, content_text FROM knowledge_documents WHERE source_type = 'text' ORDER BY id")
     .all()
     .map((row) => [row.kind, row.thread_id, row.content_text]);
   assert.deepEqual(knowledgeRows, [

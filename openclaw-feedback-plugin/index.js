@@ -6,6 +6,7 @@ import {
   handleFeedbackCallback,
   handleKnowledgeInboundClaim,
   handleKnowledgeMessage,
+  handleMetricsInfoRequest,
   handlePendingComment,
 } from "./plugin-core.js";
 
@@ -48,6 +49,9 @@ export default definePluginEntry({
 
         const botInfoResult = await handleBotInfoRequest(event, ctx, pluginConfig);
         if (botInfoResult?.handled) return botInfoResult;
+
+        const metricsInfoResult = await handleMetricsInfoRequest(event, ctx, pluginConfig);
+        if (metricsInfoResult?.handled) return metricsInfoResult;
 
         return handleKnowledgeMessage(event, ctx, pluginConfig);
       },

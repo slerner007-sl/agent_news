@@ -106,6 +106,110 @@ function isBlockedMenuRequest(value) {
   return text === "/menu" || text === "/menu@agent_ler_bot";
 }
 
+function isMetricsInfoRequest(value) {
+  const text = normalizeButtonText(value);
+  return [
+    "/metrics",
+    "/metrics@agent_ler_bot",
+    "метрики",
+    "какие метрики",
+    "какие метрики?",
+  ].includes(text);
+}
+
+function parseMetricsRows(contentText) {
+  const rows = [];
+  for (const rawLine of cleanText(contentText).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || !line.includes("|")) continue;
+    const parts = line.split("|").map((part) => part.trim());
+    if (parts.length < 6) continue;
+    const [block, role, direction, category, name, number] = parts;
+    if (!name || !number || name === "Наименование метрики" || name === "metric_name") continue;
+    rows.push({ block, role, direction, category, name, number });
+  }
+  return rows;
+}
+
+function formatMetricsSummary(pluginConfig = {}) {
+  const dbPath = resolveDbPath(pluginConfig);
+  try {
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.exec("PRAGMA busy_timeout = 5000");
+      const doc = db.prepare(`
+        SELECT file_name, source_key, content_text, created_at
+        FROM knowledge_documents
+        WHERE kind = 'metrics'
+          AND COALESCE(is_current, 1) = 1
+          AND source_type = 'file'
+          AND COALESCE(content_text, '') <> ''
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get();
+      if (!doc) {
+        return "Файл со справочником метрик пока не загружен. Пришли .xlsx в тему метрик.";
+      }
+
+      const rows = parseMetricsRows(doc.content_text);
+      const sourceName = cleanText(doc.source_key) || cleanText(doc.file_name) || "справочник метрик";
+      if (!rows.length) {
+        return `${sourceName}: файл загружен, но я не смог распознать строки метрик.`;
+      }
+
+      const blockCounts = new Map();
+      const categoryCounts = new Map();
+      for (const row of rows) {
+        const block = row.block || "Без блока";
+        const category = row.category || "Без категории";
+        blockCounts.set(block, (blockCounts.get(block) || 0) + 1);
+        categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+      }
+      const topBlocks = [...blockCounts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ru"))
+        .slice(0, 10)
+        .map(([name, count]) => `• ${name}: ${count}`)
+        .join("\n");
+      const topCategories = [...categoryCounts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ru"))
+        .slice(0, 8)
+        .map(([name, count]) => `• ${name}: ${count}`)
+        .join("\n");
+      const examples = rows
+        .slice(0, 8)
+        .map((row) => `• ${row.number} — ${row.name}`)
+        .join("\n");
+
+      return [
+        `${sourceName}, ${rows.length} метрик.`,
+        "",
+        "Блоки:",
+        topBlocks,
+        "",
+        "Категории:",
+        topCategories,
+        "",
+        "Первые строки:",
+        examples,
+      ].join("\n");
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    return "Не смог прочитать справочник метрик: " + (error instanceof Error ? error.message : String(error));
+  }
+}
+
+export async function handleMetricsInfoRequest(event, ctx, pluginConfig = {}) {
+  if (event.channel !== "telegram") return;
+  const text = event.body ?? event.content;
+  if (!isMetricsInfoRequest(text)) return;
+  return {
+    handled: true,
+    text: formatMetricsSummary(pluginConfig),
+  };
+}
+
 export async function handleBlockedMenuCommand(event) {
   if (event.channel !== "telegram") return;
   const text = event.body ?? event.content;
@@ -844,7 +948,7 @@ export async function handleKnowledgeMessage(event, ctx, pluginConfig = {}) {
   if (event.channel !== "telegram") return;
 
   const text = eventText(event);
-  if (isTopicIdRequest(text) || isBotInfoRequest(text)) return;
+  if (isTopicIdRequest(text) || isBotInfoRequest(text) || isMetricsInfoRequest(text)) return;
 
   const kind = getKnowledgeKindForThread(ctx, pluginConfig);
   if (!kind) return;
@@ -869,7 +973,7 @@ export async function handleKnowledgeInboundClaim(event, ctx, pluginConfig = {})
   if (event.channel !== "telegram") return;
 
   const text = eventText(event);
-  if (isTopicIdRequest(text) || isBotInfoRequest(text)) return;
+  if (isTopicIdRequest(text) || isBotInfoRequest(text) || isMetricsInfoRequest(text)) return;
 
   const threadId = eventThreadId(event, ctx);
   const metricsThreadId = cleanText(pluginConfig.metricsThreadId) || DEFAULT_METRICS_THREAD_ID;

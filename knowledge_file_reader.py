@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-MAX_TEXT = 24000
+MAX_TEXT = 200000
 
 
 def _clip(text: str) -> str:
