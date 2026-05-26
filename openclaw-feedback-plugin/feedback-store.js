@@ -126,29 +126,40 @@ export function saveKnowledgeDocument({
         `)
         .get(normalizedKind, normalizedSourceKey, normalizedHash);
       if (duplicate && typeof duplicate === "object") {
+        db.prepare(`
+          DELETE FROM knowledge_documents
+          WHERE kind = ?
+            AND source_key = ?
+            AND id <> ?
+        `).run(normalizedKind, normalizedSourceKey, duplicate.id);
+        db.prepare(`
+          UPDATE knowledge_documents
+          SET is_current = 1
+          WHERE id = ?
+        `).run(duplicate.id);
         return { status: "duplicate", id: duplicate.id, revision: duplicate.revision };
       }
     }
 
-    let revision = 1;
+    let hadPrevious = false;
     if (normalizedSourceKey) {
       const previous = db
         .prepare(`
-          SELECT COALESCE(MAX(revision), 0) AS max_revision
+          SELECT COUNT(*) AS count
           FROM knowledge_documents
           WHERE kind = ?
             AND source_key = ?
         `)
         .get(normalizedKind, normalizedSourceKey);
-      revision = Number(previous?.max_revision || 0) + 1;
+      hadPrevious = Number(previous?.count || 0) > 0;
       db.prepare(`
-        UPDATE knowledge_documents
-        SET is_current = 0
+        DELETE FROM knowledge_documents
         WHERE kind = ?
           AND source_key = ?
-          AND is_current = 1
       `).run(normalizedKind, normalizedSourceKey);
     }
+
+    const revision = 1;
 
     const result = db.prepare(`
       INSERT INTO knowledge_documents (
@@ -172,7 +183,7 @@ export function saveKnowledgeDocument({
       normalizedHash ?? null,
       revision,
     );
-    return { status: revision > 1 ? "updated" : "inserted", id: result.lastInsertRowid, revision };
+    return { status: hadPrevious ? "updated" : "inserted", id: result.lastInsertRowid, revision };
   } finally {
     db.close();
   }

@@ -274,6 +274,50 @@ try {
   assert.equal(fileKnowledgeRow.file_name, "metrics.txt");
   assert.match(fileKnowledgeRow.content_text, /NPL/);
 
+  const duplicateFileResult = saveKnowledgeDocument({
+    dbPath,
+    kind: "metrics",
+    threadId: "2",
+    sourceType: "file",
+    fileName: "metrics-copy.txt",
+    contentText: "ROE = чистая прибыль / капитал\nNPL = просрочка / портфель\n",
+    sourceKey: "metrics.txt",
+    contentHash: "same-hash",
+  });
+  const secondDuplicateFileResult = saveKnowledgeDocument({
+    dbPath,
+    kind: "metrics",
+    threadId: "2",
+    sourceType: "file",
+    fileName: "metrics-copy-2.txt",
+    contentText: "ROE = чистая прибыль / капитал\nNPL = просрочка / портфель\n",
+    sourceKey: "metrics.txt",
+    contentHash: "same-hash",
+  });
+  assert.equal(duplicateFileResult.status, "updated");
+  assert.equal(secondDuplicateFileResult.status, "duplicate");
+  assert.equal(
+    db.prepare("SELECT COUNT(*) FROM knowledge_documents WHERE kind = 'metrics' AND source_key = 'metrics.txt'").get()["COUNT(*)"],
+    1,
+  );
+
+  const updatedFileResult = saveKnowledgeDocument({
+    dbPath,
+    kind: "metrics",
+    threadId: "2",
+    sourceType: "file",
+    fileName: "metrics-updated.txt",
+    contentText: "ROA = прибыль / активы\n",
+    sourceKey: "metrics.txt",
+    contentHash: "updated-hash",
+  });
+  assert.equal(updatedFileResult.status, "updated");
+  const updatedFileRow = db
+    .prepare("SELECT COUNT(*) AS count, MAX(file_name) AS file_name FROM knowledge_documents WHERE kind = 'metrics' AND source_key = 'metrics.txt'")
+    .get();
+  assert.equal(updatedFileRow.count, 1);
+  assert.equal(updatedFileRow.file_name, "metrics-updated.txt");
+
   assert.equal(apiCalls.length, 3);
   assert.deepEqual(apiCalls[0].payload, {
     chat_id: "-1001",
