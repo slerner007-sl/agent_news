@@ -241,6 +241,15 @@ try {
   assert.match(metricsInfoResult.text, /metrics\.xlsx, 2 метрик/);
   assert.match(metricsInfoResult.text, /10000190 — Динамика CIR/);
 
+  const directMetricsInfoResult = await handleMetricsInfoRequest(
+    { channel: "telegram", content: "/metrics" },
+    { conversationId: "telegram:110330363" },
+    pluginConfig,
+  );
+  assert.equal(directMetricsInfoResult.handled, true);
+  assert.equal(directMetricsInfoResult.text, undefined);
+  assert.match(directMetricsInfoResult.reply.text, /\/metrics@agent_ler_bot/);
+
   const metricsResult = await handleKnowledgeMessage(
     { channel: "telegram", content: "Доля просрочки = просроченная задолженность / кредитный портфель" },
     { conversationId: "-1001:topic:2", senderId: "100", senderUsername: "stepan" },

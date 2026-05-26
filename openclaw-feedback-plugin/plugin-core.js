@@ -204,9 +204,17 @@ export async function handleMetricsInfoRequest(event, ctx, pluginConfig = {}) {
   if (event.channel !== "telegram") return;
   const text = event.body ?? event.content;
   if (!isMetricsInfoRequest(text)) return;
+  if (!isGroupConversation(event, ctx)) {
+    return {
+      handled: true,
+      reply: { text: "Личные сообщения отключены. Используй /metrics@agent_ler_bot в рабочей группе." },
+    };
+  }
+  const textResponse = formatMetricsSummary(pluginConfig);
   return {
     handled: true,
-    text: formatMetricsSummary(pluginConfig),
+    text: textResponse,
+    reply: { text: textResponse },
   };
 }
 
@@ -756,6 +764,11 @@ function eventThreadId(event = {}, ctx = {}) {
 
 function eventConversationId(event = {}, ctx = {}) {
   return cleanText(event.conversationId) || cleanText(ctx.conversationId) || cleanText(event.to) || cleanText(event.metadata?.to);
+}
+
+function isGroupConversation(event = {}, ctx = {}) {
+  const conversationId = eventConversationId(event, ctx);
+  return conversationId.includes(":group:") || conversationId.includes(":topic:") || conversationId.startsWith("-100");
 }
 
 function eventMediaEntries(event = {}) {

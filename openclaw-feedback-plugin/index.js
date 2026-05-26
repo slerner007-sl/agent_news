@@ -36,6 +36,7 @@ export default definePluginEntry({
       async (event, ctx) => {
         const blockedMenu = await handleBlockedMenuCommand(event, ctx, pluginConfig);
         if (blockedMenu?.handled) return blockedMenu;
+
         return handleKnowledgeInboundClaim(event, ctx, pluginConfig);
       },
       { priority: 300, timeoutMs: 30_000 },
