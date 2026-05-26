@@ -147,7 +147,7 @@ def filter_news_for_gosb(gosb: dict, news_items: list) -> list:
         return fallback
 
 
-def run_filter():
+def run_filter(run_id: str | None = None):
     """Run filtering for all active GOSBs."""
     gosbs = get_active_gosbs()
     print(f"🔍 Фильтруем новости для {len(gosbs)} ГОСБов...\n")
@@ -161,7 +161,7 @@ def run_filter():
         relevant = filter_news_for_gosb(gosb, news_items)
 
         for item in relevant:
-            mark_as_sent(gosb["id"], item["news"]["id"], item["summary"])
+            mark_as_sent(gosb["id"], item["news"]["id"], item["summary"], run_id=run_id)
 
         print()
 

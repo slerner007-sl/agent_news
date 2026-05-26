@@ -21,6 +21,10 @@
         "type": "number",
         "minimum": 10000,
         "default": 600000
+      },
+      "botTokenEnv": {
+        "type": "string",
+        "default": "GOSB_TELEGRAM_BOT_TOKEN"
       }
     }
   }

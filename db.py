@@ -23,6 +23,7 @@ def init_db():
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             name            TEXT NOT NULL,
             chat_id         TEXT NOT NULL,
+            thread_id       TEXT,
             region          TEXT NOT NULL,
             keywords        TEXT NOT NULL,
             system_prompt   TEXT NOT NULL,
@@ -45,13 +46,166 @@ def init_db():
             gosb_id         INTEGER NOT NULL REFERENCES gosb_config(id),
             news_id         INTEGER NOT NULL REFERENCES raw_news(id),
             summary         TEXT,
+            run_id          TEXT,
             sent_at         TEXT DEFAULT (datetime('now')),
             UNIQUE(gosb_id, news_id)
         );
 
+
+        CREATE TABLE IF NOT EXISTS feedback (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            gosb_id         INTEGER REFERENCES gosb_config(id),
+            news_id         INTEGER NOT NULL REFERENCES raw_news(id),
+            user_id         TEXT,
+            username        TEXT,
+            action          TEXT NOT NULL,
+            comment         TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_feedback_news  ON feedback(news_id);
+        CREATE INDEX IF NOT EXISTS idx_feedback_user  ON feedback(user_id);
+        CREATE INDEX IF NOT EXISTS idx_feedback_action ON feedback(action);
+
+        CREATE TABLE IF NOT EXISTS news_classification (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            gosb_id         INTEGER NOT NULL REFERENCES gosb_config(id),
+            news_id         INTEGER NOT NULL REFERENCES raw_news(id),
+            mode            TEXT NOT NULL,
+            model           TEXT,
+            relevant        INTEGER NOT NULL DEFAULT 0,
+            category        TEXT,
+            impact          TEXT,
+            confidence      REAL,
+            summary         TEXT,
+            reject_reason   TEXT,
+            rule_score      INTEGER DEFAULT 0,
+            rule_hits       TEXT,
+            llm_raw_json    TEXT,
+            created_at      TEXT DEFAULT (datetime('now')),
+            UNIQUE(gosb_id, news_id, mode)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_news_classification_news
+            ON news_classification(news_id);
+        CREATE INDEX IF NOT EXISTS idx_news_classification_gosb_mode
+            ON news_classification(gosb_id, mode);
+        CREATE INDEX IF NOT EXISTS idx_news_classification_relevant
+            ON news_classification(relevant);
+
         CREATE INDEX IF NOT EXISTS idx_raw_news_collected ON raw_news(collected_at);
         CREATE INDEX IF NOT EXISTS idx_sent_news_gosb    ON sent_news(gosb_id);
+
+        CREATE TABLE IF NOT EXISTS knowledge_documents (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind            TEXT NOT NULL,
+            thread_id       TEXT,
+            conversation_id TEXT,
+            sender_id       TEXT,
+            username        TEXT,
+            source_type     TEXT NOT NULL DEFAULT 'text',
+            file_name       TEXT,
+            mime_type       TEXT,
+            content_text    TEXT,
+            raw_json        TEXT,
+            source_key      TEXT,
+            content_hash    TEXT,
+            revision        INTEGER NOT NULL DEFAULT 1,
+            is_current      INTEGER NOT NULL DEFAULT 1,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_documents_kind
+            ON knowledge_documents(kind);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_documents_created
+            ON knowledge_documents(created_at);
+
+        CREATE TABLE IF NOT EXISTS news_metric_links (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            gosb_id         INTEGER NOT NULL REFERENCES gosb_config(id),
+            news_id         INTEGER NOT NULL REFERENCES raw_news(id),
+            mode            TEXT NOT NULL,
+            metric_key      TEXT NOT NULL,
+            metric_name     TEXT,
+            impact          TEXT,
+            confidence      REAL,
+            reason          TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_news_metric_links_news
+            ON news_metric_links(news_id);
+        CREATE INDEX IF NOT EXISTS idx_news_metric_links_gosb
+            ON news_metric_links(gosb_id, mode);
         """)
+
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(gosb_config)")}
+        if "thread_id" not in columns:
+            conn.execute("ALTER TABLE gosb_config ADD COLUMN thread_id TEXT")
+
+        sent_columns = {row["name"] for row in conn.execute("PRAGMA table_info(sent_news)")}
+        if "run_id" not in sent_columns:
+            conn.execute("ALTER TABLE sent_news ADD COLUMN run_id TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sent_news_run ON sent_news(run_id)")
+
+        feedback_columns = {row["name"] for row in conn.execute("PRAGMA table_info(feedback)")}
+        feedback_migrations = {
+            "gosb_id": "ALTER TABLE feedback ADD COLUMN gosb_id INTEGER",
+            "news_id": "ALTER TABLE feedback ADD COLUMN news_id INTEGER",
+            "user_id": "ALTER TABLE feedback ADD COLUMN user_id TEXT",
+            "username": "ALTER TABLE feedback ADD COLUMN username TEXT",
+            "action": "ALTER TABLE feedback ADD COLUMN action TEXT",
+            "comment": "ALTER TABLE feedback ADD COLUMN comment TEXT",
+            "created_at": "ALTER TABLE feedback ADD COLUMN created_at TEXT",
+        }
+        for column, sql in feedback_migrations.items():
+            if column not in feedback_columns:
+                conn.execute(sql)
+
+
+        knowledge_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(knowledge_documents)")
+        }
+        knowledge_migrations = {
+            "source_key": "ALTER TABLE knowledge_documents ADD COLUMN source_key TEXT",
+            "content_hash": "ALTER TABLE knowledge_documents ADD COLUMN content_hash TEXT",
+            "revision": "ALTER TABLE knowledge_documents ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+            "is_current": "ALTER TABLE knowledge_documents ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1",
+        }
+        for column, sql in knowledge_migrations.items():
+            if column not in knowledge_columns:
+                conn.execute(sql)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_knowledge_documents_source
+                ON knowledge_documents(kind, source_key, is_current)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_knowledge_documents_hash
+                ON knowledge_documents(kind, source_key, content_hash)
+        """)
+
+        classification_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(news_classification)")
+        }
+        classification_migrations = {
+            "gosb_id": "ALTER TABLE news_classification ADD COLUMN gosb_id INTEGER",
+            "news_id": "ALTER TABLE news_classification ADD COLUMN news_id INTEGER",
+            "mode": "ALTER TABLE news_classification ADD COLUMN mode TEXT",
+            "model": "ALTER TABLE news_classification ADD COLUMN model TEXT",
+            "relevant": "ALTER TABLE news_classification ADD COLUMN relevant INTEGER DEFAULT 0",
+            "category": "ALTER TABLE news_classification ADD COLUMN category TEXT",
+            "impact": "ALTER TABLE news_classification ADD COLUMN impact TEXT",
+            "confidence": "ALTER TABLE news_classification ADD COLUMN confidence REAL",
+            "summary": "ALTER TABLE news_classification ADD COLUMN summary TEXT",
+            "reject_reason": "ALTER TABLE news_classification ADD COLUMN reject_reason TEXT",
+            "rule_score": "ALTER TABLE news_classification ADD COLUMN rule_score INTEGER DEFAULT 0",
+            "rule_hits": "ALTER TABLE news_classification ADD COLUMN rule_hits TEXT",
+            "llm_raw_json": "ALTER TABLE news_classification ADD COLUMN llm_raw_json TEXT",
+            "created_at": "ALTER TABLE news_classification ADD COLUMN created_at TEXT",
+        }
+        for column, sql in classification_migrations.items():
+            if column not in classification_columns:
+                conn.execute(sql)
     print("✅ БД инициализирована")
 
 
@@ -90,20 +244,141 @@ def save_raw_news(items: list) -> int:
     return saved
 
 
-def mark_as_sent(gosb_id: int, news_id: int, summary: str):
+def mark_as_sent(gosb_id: int, news_id: int, summary: str, run_id: str | None = None):
     with get_conn() as conn:
         conn.execute("""
-            INSERT OR IGNORE INTO sent_news (gosb_id, news_id, summary)
-            VALUES (?, ?, ?)
-        """, (gosb_id, news_id, summary))
+            INSERT OR IGNORE INTO sent_news (gosb_id, news_id, summary, run_id)
+            VALUES (?, ?, ?, ?)
+        """, (gosb_id, news_id, summary, run_id))
 
 
-def add_gosb(name, chat_id, region, keywords, system_prompt):
+def save_news_classification(
+    gosb_id: int,
+    news_id: int,
+    mode: str,
+    model: str,
+    relevant: bool,
+    category: str,
+    impact: str,
+    confidence: float,
+    summary: str,
+    reject_reason: str,
+    rule_score: int = 0,
+    rule_hits: list | None = None,
+    llm_raw_json: dict | list | str | None = None,
+):
+    if isinstance(llm_raw_json, (dict, list)):
+        llm_raw_json = json.dumps(llm_raw_json, ensure_ascii=False)
+    if isinstance(rule_hits, list):
+        rule_hits = json.dumps(rule_hits, ensure_ascii=False)
+
     with get_conn() as conn:
         conn.execute("""
-            INSERT INTO gosb_config (name, chat_id, region, keywords, system_prompt)
-            VALUES (?, ?, ?, ?, ?)
-        """, (name, chat_id, region, json.dumps(keywords, ensure_ascii=False), system_prompt))
+            INSERT INTO news_classification (
+                gosb_id, news_id, mode, model, relevant, category, impact,
+                confidence, summary, reject_reason, rule_score, rule_hits, llm_raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(gosb_id, news_id, mode) DO UPDATE SET
+                model = excluded.model,
+                relevant = excluded.relevant,
+                category = excluded.category,
+                impact = excluded.impact,
+                confidence = excluded.confidence,
+                summary = excluded.summary,
+                reject_reason = excluded.reject_reason,
+                rule_score = excluded.rule_score,
+                rule_hits = excluded.rule_hits,
+                llm_raw_json = excluded.llm_raw_json,
+                created_at = datetime('now')
+        """, (
+            gosb_id,
+            news_id,
+            mode,
+            model,
+            int(bool(relevant)),
+            category,
+            impact,
+            confidence,
+            summary,
+            reject_reason,
+            rule_score,
+            rule_hits,
+            llm_raw_json,
+        ))
+
+
+def get_knowledge_context(kind: str | None = None, limit: int = 8, max_chars: int = 3500) -> str:
+    query = """
+        SELECT kind, content_text, file_name, created_at
+        FROM knowledge_documents
+        WHERE COALESCE(content_text, '') <> ''
+          AND COALESCE(is_current, 1) = 1
+    """
+    params: list = []
+    if kind:
+        query += " AND kind = ?"
+        params.append(kind)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    lines = []
+    total = 0
+    for row in rows:
+        content = " ".join((row["content_text"] or "").split())
+        if not content:
+            continue
+        name = row["file_name"] or row["kind"]
+        line = f"- [{row['kind']}] {name}: {content[:700]}"
+        if total + len(line) > max_chars:
+            break
+        lines.append(line)
+        total += len(line)
+    return "\n".join(lines) if lines else "Пока нет загруженного контекста."
+
+
+def save_news_metric_links(
+    gosb_id: int,
+    news_id: int,
+    mode: str,
+    metric_links: list | None,
+):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM news_metric_links WHERE gosb_id = ? AND news_id = ? AND mode = ?",
+            (gosb_id, news_id, mode),
+        )
+        for link in metric_links or []:
+            metric_key = str(link.get("metric_key") or link.get("metric_name") or "").strip()
+            if not metric_key:
+                continue
+            conn.execute("""
+                INSERT INTO news_metric_links (
+                    gosb_id, news_id, mode, metric_key, metric_name,
+                    impact, confidence, reason
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                gosb_id,
+                news_id,
+                mode,
+                metric_key[:160],
+                str(link.get("metric_name") or "").strip()[:220] or None,
+                str(link.get("impact") or "context").strip()[:40],
+                float(link.get("confidence") or 0),
+                str(link.get("reason") or "").strip()[:500],
+            ))
+
+
+def add_gosb(name, chat_id, region, keywords, system_prompt, thread_id=None):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO gosb_config (name, chat_id, thread_id, region, keywords, system_prompt)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (name, chat_id, thread_id, region, json.dumps(keywords, ensure_ascii=False), system_prompt))
     print(f"✅ ГОСБ '{name}' добавлен")
 
 

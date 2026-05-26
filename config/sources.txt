@@ -1,0 +1,39 @@
+# Источники для новостного дайджеста.
+# Форматы:
+# rss:Название|URL|site
+# telegram:Название|username
+
+rss:Волга Ньюс — Экономика|https://volga.news/rss1/google/7/economics/index.xml|https://volga.news
+rss:Волга Ньюс — Власть|https://volga.news/rss1/google/7/politics/index.xml|https://volga.news
+rss:Волга Ньюс — Общество|https://volga.news/rss1/google/7/society/index.xml|https://volga.news
+rss:Коммерсантъ Самара|https://www.kommersant.ru/RSS/regions/63.xml|https://www.kommersant.ru/regions/63
+
+telegram:Федорищев. Официально|fedorishchev_official
+telegram:Самарская область (официальный)|SamarOblast
+telegram:63.RU Новости|news63ru
+telegram:Самара Новости|samarap
+
+# Ленинградская область
+rss:Ленинградская область — Правительство|https://lenobl.ru/rss/|https://lenobl.ru
+rss:47news Ленинградская область|https://47news.ru/rss/|https://47news.ru
+rss:Online47|https://online47.ru/rss/|https://online47.ru
+telegram:Дрозденко. Ленинградская область|drozdenko_au_lo
+telegram:Админка Ленобласти|lenobladminka
+telegram:Ленинградская область|lenobl
+telegram:Online47|online47news
+
+# Калининградская область
+rss:Калининградская область — Правительство|https://gov39.ru/press/rss/|https://gov39.ru
+rss:Новый Калининград|https://www.newkaliningrad.ru/news/rss.xml|https://www.newkaliningrad.ru
+telegram:Беспрозванных. Калининград|besprozvannih
+telegram:Правительство Калининградской области|government_kgd
+telegram:Клопс|klops_news
+telegram:RUGRAD|rugrad
+telegram:Калининград.Ru|kaliningradru
+
+# Ульяновская область
+rss:УЛПРЕССА|https://ulpressa.ru/feed/|https://ulpressa.ru
+telegram:Ульяновская область|ulgovru
+telegram:Ulpravda.ru|ulpravda
+telegram:УЛПРЕССА|ulpressa
+

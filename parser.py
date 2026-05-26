@@ -3,13 +3,14 @@ parser.py - collect news from RSS feeds and public Telegram channels.
 """
 
 import feedparser
+import html
 import os
 import requests
 import socket
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from db import save_raw_news
-from samara_sources import RSS_SOURCES, TG_SOURCES
+from sources_loader import RSS_SOURCES, TG_SOURCES, WPAPI_SOURCES
 
 # таймаут 5 секунд на каждый источник
 socket.setdefaulttimeout(5)
@@ -164,6 +165,68 @@ def parse_rss(source: dict) -> list:
     return items
 
 
+def _strip_html(value: str) -> str:
+    parser = HTMLTextParser()
+    parser.feed(value or "")
+    return _clean_text("".join(parser.parts))
+
+
+class HTMLTextParser(HTMLParser):
+    """Convert small HTML fragments from JSON APIs to plain text."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"br", "p", "div", "li"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def _rendered(value) -> str:
+    if isinstance(value, dict):
+        value = value.get("rendered", "")
+    return html.unescape(str(value or ""))
+
+
+def parse_wpapi(source: dict) -> list:
+    items = []
+    try:
+        response = requests.get(
+            source["url"],
+            headers={"User-Agent": TG_USER_AGENT},
+            timeout=TG_TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, dict):
+            payload = payload.get("items") or payload.get("posts") or []
+
+        for post in payload:
+            if not isinstance(post, dict):
+                continue
+            title = _strip_html(_rendered(post.get("title")))
+            body = _strip_html(_rendered(post.get("excerpt")) or _rendered(post.get("content")))
+            url = post.get("link") or post.get("url") or ""
+            if not url or not title:
+                continue
+            items.append({
+                "url": url,
+                "title": title,
+                "body": body,
+                "source": f"wpapi:{source['name']}",
+                "published_at": post.get("date_gmt") or post.get("date") or datetime.now().isoformat(),
+            })
+
+        print(f"✅ {source['name']} (WP API): {len(items)} новостей")
+    except Exception as e:
+        print(f"❌ {source['name']} (WP API): ошибка — {e}")
+    return items
+
+
 def parse_telegram(source: dict) -> list:
     items = []
     try:
@@ -200,6 +263,10 @@ def collect_all_news() -> int:
 
     for source in RSS_SOURCES:
         items = parse_rss(source)
+        all_items.extend(items)
+
+    for source in WPAPI_SOURCES:
+        items = parse_wpapi(source)
         all_items.extend(items)
 
     for source in TG_SOURCES:

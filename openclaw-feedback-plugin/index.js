@@ -1,6 +1,10 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import {
+  handleBotInfoCallback,
+  handleBotInfoRequest,
   handleFeedbackCallback,
+  handleKnowledgeInboundClaim,
+  handleKnowledgeMessage,
   handlePendingComment,
 } from "./plugin-core.js";
 
@@ -19,9 +23,29 @@ export default definePluginEntry({
       });
     }
 
+    api.registerInteractiveHandler({
+      channel: "telegram",
+      namespace: "botinfo",
+      handler: (ctx) => handleBotInfoCallback(ctx, pluginConfig),
+    });
+
+    api.on(
+      "inbound_claim",
+      async (event, ctx) => handleKnowledgeInboundClaim(event, ctx, pluginConfig),
+      { priority: 200, timeoutMs: 30_000 },
+    );
+
     api.on(
       "before_dispatch",
-      (event, ctx) => handlePendingComment(event, ctx, pluginConfig),
+      async (event, ctx) => {
+        const commentResult = await handlePendingComment(event, ctx, pluginConfig);
+        if (commentResult?.handled) return commentResult;
+
+        const botInfoResult = await handleBotInfoRequest(event, ctx, pluginConfig);
+        if (botInfoResult?.handled) return botInfoResult;
+
+        return handleKnowledgeMessage(event, ctx, pluginConfig);
+      },
       { priority: 100, timeoutMs: 15_000 },
     );
   },

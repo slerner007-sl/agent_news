@@ -11,6 +11,60 @@ import { DatabaseSync } from "node:sqlite";
 const DEFAULT_DB_PATH = "/home/user1/gosb_bot/data/news_bot.db";
 const DEFAULT_PENDING_PATH = "/home/user1/gosb_bot/data/openclaw_feedback_pending.json";
 const DEFAULT_COMMENT_TTL_MS = 10 * 60 * 1000;
+const KNOWLEDGE_KINDS = new Set(["metrics", "methodology"]);
+
+function safeJson(value) {
+  try {
+    return JSON.stringify(value ?? null);
+  } catch {
+    return null;
+  }
+}
+
+function ensureKnowledgeTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_documents (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind            TEXT NOT NULL,
+      thread_id       TEXT,
+      conversation_id TEXT,
+      sender_id       TEXT,
+      username        TEXT,
+      source_type     TEXT NOT NULL DEFAULT 'text',
+      file_name       TEXT,
+      mime_type       TEXT,
+      content_text    TEXT,
+      raw_json        TEXT,
+      source_key      TEXT,
+      content_hash    TEXT,
+      revision        INTEGER NOT NULL DEFAULT 1,
+      is_current      INTEGER NOT NULL DEFAULT 1,
+      created_at      TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_documents_kind
+      ON knowledge_documents(kind);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_documents_created
+      ON knowledge_documents(created_at);
+  `);
+
+  const columns = new Set(db.prepare("PRAGMA table_info(knowledge_documents)").all().map((row) => row.name));
+  const migrations = {
+    source_key: "ALTER TABLE knowledge_documents ADD COLUMN source_key TEXT",
+    content_hash: "ALTER TABLE knowledge_documents ADD COLUMN content_hash TEXT",
+    revision: "ALTER TABLE knowledge_documents ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+    is_current: "ALTER TABLE knowledge_documents ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1",
+  };
+  for (const [column, sql] of Object.entries(migrations)) {
+    if (!columns.has(column)) db.exec(sql);
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_documents_source
+      ON knowledge_documents(kind, source_key, is_current);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_documents_hash
+      ON knowledge_documents(kind, source_key, content_hash);
+  `);
+}
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -33,6 +87,97 @@ export function resolveCommentTtlMs(pluginConfig = {}) {
   return Number.isFinite(value) && value >= 10_000 ? Math.trunc(value) : DEFAULT_COMMENT_TTL_MS;
 }
 
+export function saveKnowledgeDocument({
+  dbPath,
+  kind,
+  threadId,
+  conversationId,
+  senderId,
+  username,
+  sourceType = "text",
+  fileName,
+  mimeType,
+  contentText,
+  raw,
+  sourceKey,
+  contentHash,
+}) {
+  const normalizedKind = nonEmptyString(kind);
+  if (!normalizedKind || !KNOWLEDGE_KINDS.has(normalizedKind)) {
+    throw new Error("Invalid knowledge kind");
+  }
+
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    ensureKnowledgeTables(db);
+    const normalizedSourceKey = nonEmptyString(sourceKey);
+    const normalizedHash = nonEmptyString(contentHash);
+    if (normalizedSourceKey && normalizedHash) {
+      const duplicate = db
+        .prepare(`
+          SELECT id, revision
+          FROM knowledge_documents
+          WHERE kind = ?
+            AND source_key = ?
+            AND content_hash = ?
+          ORDER BY id DESC
+          LIMIT 1
+        `)
+        .get(normalizedKind, normalizedSourceKey, normalizedHash);
+      if (duplicate && typeof duplicate === "object") {
+        return { status: "duplicate", id: duplicate.id, revision: duplicate.revision };
+      }
+    }
+
+    let revision = 1;
+    if (normalizedSourceKey) {
+      const previous = db
+        .prepare(`
+          SELECT COALESCE(MAX(revision), 0) AS max_revision
+          FROM knowledge_documents
+          WHERE kind = ?
+            AND source_key = ?
+        `)
+        .get(normalizedKind, normalizedSourceKey);
+      revision = Number(previous?.max_revision || 0) + 1;
+      db.prepare(`
+        UPDATE knowledge_documents
+        SET is_current = 0
+        WHERE kind = ?
+          AND source_key = ?
+          AND is_current = 1
+      `).run(normalizedKind, normalizedSourceKey);
+    }
+
+    const result = db.prepare(`
+      INSERT INTO knowledge_documents (
+        kind, thread_id, conversation_id, sender_id, username, source_type,
+        file_name, mime_type, content_text, raw_json, source_key, content_hash,
+        revision, is_current
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    `).run(
+      normalizedKind,
+      nonEmptyString(threadId) ?? null,
+      nonEmptyString(conversationId) ?? null,
+      nonEmptyString(senderId) ?? null,
+      nonEmptyString(username) ?? null,
+      nonEmptyString(sourceType) ?? "text",
+      nonEmptyString(fileName) ?? null,
+      nonEmptyString(mimeType) ?? null,
+      nonEmptyString(contentText) ?? null,
+      safeJson(raw),
+      normalizedSourceKey ?? null,
+      normalizedHash ?? null,
+      revision,
+    );
+    return { status: revision > 1 ? "updated" : "inserted", id: result.lastInsertRowid, revision };
+  } finally {
+    db.close();
+  }
+}
+
 export function parseFeedbackCallback(data) {
   const text = nonEmptyString(data);
   if (!text) return null;
@@ -49,6 +194,57 @@ export function parseFeedbackCallback(data) {
     action,
     newsId: Number(rawNewsId),
   };
+}
+
+export function getNewsCommentContext({ dbPath, newsId }) {
+  if (!Number.isInteger(newsId) || newsId <= 0) return null;
+
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    const row = db
+      .prepare("SELECT title, source FROM raw_news WHERE id = ? LIMIT 1")
+      .get(newsId);
+    if (!row || typeof row !== "object") return null;
+
+    const title = nonEmptyString(row.title);
+    const source = nonEmptyString(row.source);
+    if (!title && !source) return null;
+
+    return { title, source };
+  } finally {
+    db.close();
+  }
+}
+
+export function getFeedbackCounts({ dbPath, newsId }) {
+  if (!Number.isInteger(newsId) || newsId <= 0) {
+    return { useful: 0, boring: 0, comments: 0 };
+  }
+
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    const rows = db
+      .prepare(`
+        SELECT action, COUNT(*) AS count
+        FROM feedback
+        WHERE news_id = ?
+          AND action IN ('useful', 'boring', 'comment')
+        GROUP BY action
+      `)
+      .all(newsId);
+
+    const counts = { useful: 0, boring: 0, comments: 0 };
+    for (const row of rows) {
+      if (row.action === "useful") counts.useful = Number(row.count || 0);
+      if (row.action === "boring") counts.boring = Number(row.count || 0);
+      if (row.action === "comment") counts.comments = Number(row.count || 0);
+    }
+    return counts;
+  } finally {
+    db.close();
+  }
 }
 
 export async function saveFeedback({ dbPath, newsId, userId, username, action, comment }) {
@@ -85,7 +281,15 @@ export async function saveFeedback({ dbPath, newsId, userId, username, action, c
 
       if (existing && typeof existing === "object") {
         if (existing.action === action) {
-          return { status: "duplicate", action };
+          db.prepare(
+            `
+            DELETE FROM feedback
+            WHERE news_id = ?
+              AND user_id = ?
+              AND action IN ('useful', 'boring')
+            `,
+          ).run(newsId, normalizedUserId);
+          return { status: "removed", action };
         }
 
         db.prepare(
@@ -196,6 +400,9 @@ export function rememberPendingComment(params) {
     conversationId: params.conversationId,
     senderId: params.senderId,
     senderUsername: params.senderUsername ?? "",
+    callbackChatId: params.callbackChatId ?? "",
+    callbackMessageId: params.callbackMessageId ?? null,
+    callbackThreadId: params.callbackThreadId ?? null,
     createdAt: now,
     expiresAt: now + (params.ttlMs ?? DEFAULT_COMMENT_TTL_MS),
   };

@@ -1,2 +1,16 @@
 openclaw_workspace/.openclaw/
 openclaw_workspace/*.json*
+
+# Runtime/generated files
+__pycache__/
+*.py[cod]
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.png
+data/openclaw_feedback_pending.json
+logs/
+*.bak-*
+*.bak
+crontab.bak-*
+crontab.v2-filter
