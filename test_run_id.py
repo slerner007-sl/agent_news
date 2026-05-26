@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import tempfile
 
 import db
@@ -37,6 +38,7 @@ run_filter_v2(
     run_id="current-run",
 )
 
+os.environ.setdefault("GOSB_TELEGRAM_BOT_TOKEN", "test-token")
 import sender
 
 sent = []
