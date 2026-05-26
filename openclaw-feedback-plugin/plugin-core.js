@@ -94,13 +94,28 @@ function isBotInfoRequest(value) {
   return [
     "что я умею",
     "меню",
-    "/menu",
-    "/menu@agent_ler_bot",
     "/what_can_you_do",
     "/what_can_you_do@agent_ler_bot",
     "/help",
     "/help@agent_ler_bot",
   ].includes(text);
+}
+
+function isBlockedMenuRequest(value) {
+  const text = normalizeButtonText(value);
+  return text === "/menu" || text === "/menu@agent_ler_bot";
+}
+
+export async function handleBlockedMenuCommand(event) {
+  if (event.channel !== "telegram") return;
+  const text = event.body ?? event.content;
+  if (!isBlockedMenuRequest(text)) return;
+  return {
+    handled: true,
+    reply: {
+      text: "Команду /menu отключил. Используй /what_can_you_do.",
+    },
+  };
 }
 
 function isTopicIdRequest(value) {
@@ -288,13 +303,7 @@ function resolveTelegramBotToken(pluginConfig = {}) {
   const fromEnv = cleanText(process.env[envName]) || cleanText(process.env.TELEGRAM_BOT_TOKEN);
   if (fromEnv) return fromEnv;
 
-  try {
-    const senderPy = readFileSync(SENDER_PY_PATH, "utf8");
-    const match = senderPy.match(/BOT_TOKEN\s*=\s*["']([^"']+)["']/);
-    return cleanText(match?.[1]);
-  } catch {
-    return "";
-  }
+  return "";
 }
 
 function escapeHtml(value) {
@@ -319,16 +328,6 @@ function telegramTargetFromSessionKey(value) {
   const match = text.match(/telegram:group:(-?\d+):topic:(\d+)/);
   if (!match) return { chatId: "", threadId: "" };
   return { chatId: match[1], threadId: match[2] };
-}
-
-function buildBotInfoReplyKeyboard() {
-  return {
-    keyboard: [[{ text: BOT_INFO_BUTTON_TEXT }]],
-    resize_keyboard: true,
-    is_persistent: true,
-    one_time_keyboard: false,
-    input_field_placeholder: "Выберите действие",
-  };
 }
 
 async function sendTelegramTextMessage({ chatId, threadId, text, parseMode = "", replyMarkup = null, pluginConfig = {} }) {
@@ -545,7 +544,6 @@ export async function handleBotInfoCallback(ctx, pluginConfig = {}) {
     ? await sendTelegramTextMessage({
         ...target,
         text: formatBotInfoSummary(pluginConfig),
-        replyMarkup: buildBotInfoReplyKeyboard(),
       })
     : false;
   if (summarySent) {
@@ -913,7 +911,7 @@ export async function handleBotInfoRequest(event, ctx, pluginConfig = {}) {
   const summary = formatBotInfoSummary(pluginConfig);
   const directSendEnabled = pluginConfig.botInfoDirectSendEnabled !== false;
   const summarySent = directSendEnabled
-    ? await sendTelegramTextMessage({ ...target, text: summary, replyMarkup: buildBotInfoReplyKeyboard(), pluginConfig })
+    ? await sendTelegramTextMessage({ ...target, text: summary, pluginConfig })
     : false;
   if (summarySent) {
     await sendPromptBlockMessage({ ...target, pluginConfig });

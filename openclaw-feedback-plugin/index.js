@@ -1,5 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import {
+  handleBlockedMenuCommand,
   handleBotInfoCallback,
   handleBotInfoRequest,
   handleFeedbackCallback,
@@ -31,8 +32,12 @@ export default definePluginEntry({
 
     api.on(
       "inbound_claim",
-      async (event, ctx) => handleKnowledgeInboundClaim(event, ctx, pluginConfig),
-      { priority: 200, timeoutMs: 30_000 },
+      async (event, ctx) => {
+        const blockedMenu = await handleBlockedMenuCommand(event, ctx, pluginConfig);
+        if (blockedMenu?.handled) return blockedMenu;
+        return handleKnowledgeInboundClaim(event, ctx, pluginConfig);
+      },
+      { priority: 300, timeoutMs: 30_000 },
     );
 
     api.on(

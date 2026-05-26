@@ -439,7 +439,7 @@ def _build_prompt(gosb: dict, batch: list[dict]) -> str:
       "summary": "1-2 предложения, почему это важно для банка",
       "reject_reason": "если relevant=false, коротко почему",
       "metric_links": [
-        {"metric_key": "ключ/название метрики из контекста", "metric_name": "человекочитаемое название", "impact": "positive|negative|risk|context|none", "confidence": 0.0, "reason": "почему новость связана с метрикой"}
+        {{"metric_key": "ключ/название метрики из контекста", "metric_name": "человекочитаемое название", "impact": "positive|negative|risk|context|none", "confidence": 0.0, "reason": "почему новость связана с метрикой"}}
       ]
     }}
   ]

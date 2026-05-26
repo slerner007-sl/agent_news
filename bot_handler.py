@@ -4,11 +4,12 @@ bot_handler.py — обработчик кнопок обратной связи
 """
 
 import logging
+import os
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-BOT_TOKEN = "8655293057:AAEeSNZLenovxgQq-XLGewz7wBNAcBAJhRo"
+BOT_TOKEN = os.getenv("GOSB_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 DB_PATH = "/home/user1/gosb_bot/data/news_bot.db"
 
 logging.basicConfig(level=logging.INFO)
@@ -77,6 +78,8 @@ def build_keyboard(news_id: int) -> InlineKeyboardMarkup:
 
 
 if __name__ == "__main__":
+    if not BOT_TOKEN:
+        raise RuntimeError("Telegram bot token is not set. Set GOSB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_comment))

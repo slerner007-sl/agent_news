@@ -10,7 +10,9 @@ from html import escape
 from datetime import datetime
 from db import get_conn, get_active_gosbs
 
-BOT_TOKEN = "8655293057:AAEeSNZLenovxgQq-XLGewz7wBNAcBAJhRo"
+BOT_TOKEN = os.getenv("GOSB_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("Telegram bot token is not set. Set GOSB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.")
 TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 SEND_DELAY_SECONDS = float(os.getenv("TG_SEND_DELAY_SECONDS", "1.2"))
 SEND_MAX_RETRIES = int(os.getenv("TG_SEND_MAX_RETRIES", "3"))
@@ -90,6 +92,13 @@ def build_keyboard(news_id):
     }
 
 
+def truncate_text(value, max_length):
+    text = str(value or "")
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3].rstrip() + "..."
+
+
 def send_digest(run_id=None):
     gosbs = get_active_gosbs()
     print(f"📤 Отправляем дайджест для {len(gosbs)} ГОСБов...\n")
@@ -119,8 +128,8 @@ def send_digest(run_id=None):
             failed_count += 1
 
         for i, item in enumerate(news_items, 1):
-            title = escape(str(item["title"]))
-            summary = escape(str(item["summary"] or ""))
+            title = escape(truncate_text(item["title"], 500))
+            summary = escape(truncate_text(item["summary"] or "", 2600))
             url = escape(str(item["url"]), quote=True)
             text = (
                 f"<b>{i}. {title}</b>\n"
