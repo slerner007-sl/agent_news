@@ -183,6 +183,24 @@ def init_db():
             ON insights(gosb_id, status);
         CREATE INDEX IF NOT EXISTS idx_insight_news_links_news
             ON insight_news_links(news_id);
+
+        CREATE TABLE IF NOT EXISTS insight_feedback (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            gosb_id         INTEGER REFERENCES gosb_config(id),
+            insight_id      INTEGER NOT NULL REFERENCES insights(id),
+            user_id         TEXT,
+            username        TEXT,
+            action          TEXT NOT NULL,
+            comment         TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_insight_feedback_insight
+            ON insight_feedback(insight_id);
+        CREATE INDEX IF NOT EXISTS idx_insight_feedback_user
+            ON insight_feedback(user_id);
+        CREATE INDEX IF NOT EXISTS idx_insight_feedback_action
+            ON insight_feedback(action);
         """)
 
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(gosb_config)")}

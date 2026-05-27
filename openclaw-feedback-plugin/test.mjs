@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   consumePendingComment,
   getFeedbackCounts,
+  getInsightFeedbackCounts,
   getNewsCommentContext,
   parseFeedbackCallback,
   rememberPendingComment,
@@ -27,9 +28,10 @@ const previousFetch = globalThis.fetch;
 const previousToken = process.env.GOSB_TELEGRAM_BOT_TOKEN;
 
 try {
-  assert.deepEqual(parseFeedbackCallback("useful:123"), { action: "useful", newsId: 123 });
-  assert.deepEqual(parseFeedbackCallback("boring:456"), { action: "boring", newsId: 456 });
-  assert.deepEqual(parseFeedbackCallback("comment:789"), { action: "comment", newsId: 789 });
+  assert.deepEqual(parseFeedbackCallback("useful:123"), { action: "useful", targetType: "news", targetId: 123, newsId: 123, insightId: undefined });
+  assert.deepEqual(parseFeedbackCallback("boring:456"), { action: "boring", targetType: "news", targetId: 456, newsId: 456, insightId: undefined });
+  assert.deepEqual(parseFeedbackCallback("comment:789"), { action: "comment", targetType: "news", targetId: 789, newsId: 789, insightId: undefined });
+  assert.deepEqual(parseFeedbackCallback("iuseful:321"), { action: "useful", targetType: "insight", targetId: 321, newsId: undefined, insightId: 321 });
   assert.equal(parseFeedbackCallback("bad:123"), null);
   assert.equal(parseFeedbackCallback("useful:abc"), null);
 
@@ -95,6 +97,30 @@ try {
       comment TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE insights (
+      id INTEGER PRIMARY KEY,
+      gosb_id INTEGER,
+      title TEXT NOT NULL,
+      insight_type TEXT NOT NULL,
+      priority TEXT NOT NULL,
+      confidence REAL DEFAULT 0,
+      why_it_matters TEXT,
+      suggested_action TEXT,
+      owner_hint TEXT,
+      evidence TEXT,
+      status TEXT DEFAULT 'proposed',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE insight_feedback (
+      id INTEGER PRIMARY KEY,
+      gosb_id INTEGER,
+      insight_id INTEGER,
+      user_id TEXT,
+      username TEXT,
+      action TEXT,
+      comment TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
     CREATE TABLE gosb_config (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
@@ -108,6 +134,8 @@ try {
     .prepare("INSERT INTO raw_news (id, title, source) VALUES (?, ?, ?)")
     .run(42, "ВТБ открыл флагманский офис в Тольятти", "Волга Ньюс");
   db.prepare("INSERT INTO sent_news (gosb_id, news_id, summary) VALUES (?, ?, ?)").run(77, 42, "summary");
+  db.prepare("INSERT INTO insights (id, gosb_id, title, insight_type, priority, confidence, why_it_matters, suggested_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(7, 77, "Проверить потенциал финансирования", "client_signal", "high", 0.88, "важно", "проверить клиента");
   db.prepare("INSERT INTO gosb_config (id, name, region, thread_id, active) VALUES (?, ?, ?, ?, ?)")
     .run(1, "Самарский ГОСБ", "Самара, Самарская область", "6", 1);
   db.prepare("INSERT INTO gosb_config (id, name, region, thread_id, active) VALUES (?, ?, ?, ?, ?)")
@@ -545,6 +573,56 @@ try {
   assert.deepEqual(
     { action: commentRow.action, comment: commentRow.comment },
     { action: "comment", comment: "надо меньше политики" },
+  );
+
+  const insightReactionReplies = [];
+  const insightReactionCtx = {
+    ...callbackCtx,
+    callbackId: "insight-reaction-callback-id",
+    callback: { data: "iuseful:7", chatId: "-1001", messageId: 701 },
+    respond: {
+      editButtons: async (message) => {
+        insightReactionReplies.push(JSON.stringify(message.buttons));
+      },
+      reply: async (message) => {
+        insightReactionReplies.push(message.text);
+      },
+    },
+  };
+  assert.deepEqual(await handleFeedbackCallback(insightReactionCtx, pluginConfig), { handled: true });
+  assert.equal(insightReactionReplies[0], JSON.stringify([[
+    { text: "✅ 1", callback_data: "iuseful:7" },
+    { text: "👎 0", callback_data: "iboring:7" },
+    { text: "💬 0", callback_data: "icomment:7" },
+  ]]));
+  assert.deepEqual(getInsightFeedbackCounts({ dbPath, insightId: 7 }), { useful: 1, boring: 0, comments: 0 });
+
+  const insightCommentCtx = {
+    ...callbackCtx,
+    callbackId: "insight-comment-callback-id",
+    callback: { data: "icomment:7", chatId: "-1001", messageId: 701 },
+  };
+  assert.deepEqual(await handleFeedbackCallback(insightCommentCtx, pluginConfig), { handled: true });
+  const insightCommentResult = await handlePendingComment(
+    { channel: "telegram", content: "проверить через РМ" },
+    {
+      accountId: "default",
+      conversationId: "-1001:topic:6",
+      senderId: "100",
+    },
+    pluginConfig,
+  );
+  assert.deepEqual(insightCommentResult, {
+    handled: true,
+    text: ["Комментарий к инсайту сохранен:", "Проверить потенциал финансирования"].join("\n"),
+  });
+  assert.deepEqual(getInsightFeedbackCounts({ dbPath, insightId: 7 }), { useful: 1, boring: 0, comments: 1 });
+  const insightCommentRow = db
+    .prepare("SELECT action, comment FROM insight_feedback WHERE insight_id = ? ORDER BY id DESC LIMIT 1")
+    .get(7);
+  assert.deepEqual(
+    { action: insightCommentRow.action, comment: insightCommentRow.comment },
+    { action: "comment", comment: "проверить через РМ" },
   );
   db.close();
 

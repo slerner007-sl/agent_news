@@ -66,6 +66,29 @@ function ensureKnowledgeTables(db) {
   `);
 }
 
+function ensureInsightFeedbackTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS insight_feedback (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      gosb_id         INTEGER,
+      insight_id      INTEGER NOT NULL,
+      user_id         TEXT,
+      username        TEXT,
+      action          TEXT NOT NULL,
+      comment         TEXT,
+      created_at      TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_insight_feedback_insight
+      ON insight_feedback(insight_id);
+    CREATE INDEX IF NOT EXISTS idx_insight_feedback_user
+      ON insight_feedback(user_id);
+    CREATE INDEX IF NOT EXISTS idx_insight_feedback_action
+      ON insight_feedback(action);
+  `);
+}
+
+
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -196,14 +219,29 @@ export function parseFeedbackCallback(data) {
   const separator = text.indexOf(":");
   if (separator <= 0 || separator === text.length - 1) return null;
 
-  const action = text.slice(0, separator).trim();
-  const rawNewsId = text.slice(separator + 1).trim();
-  if (!["useful", "boring", "comment"].includes(action)) return null;
-  if (!/^[0-9]+$/.test(rawNewsId)) return null;
+  const rawAction = text.slice(0, separator).trim();
+  const rawId = text.slice(separator + 1).trim();
+  if (!/^[0-9]+$/.test(rawId)) return null;
 
+  const insightActions = {
+    iuseful: "useful",
+    iboring: "boring",
+    icomment: "comment",
+    insight_useful: "useful",
+    insight_boring: "boring",
+    insight_comment: "comment",
+  };
+  const targetType = Object.prototype.hasOwnProperty.call(insightActions, rawAction) ? "insight" : "news";
+  const action = targetType === "insight" ? insightActions[rawAction] : rawAction;
+  if (!["useful", "boring", "comment"].includes(action)) return null;
+
+  const targetId = Number(rawId);
   return {
     action,
-    newsId: Number(rawNewsId),
+    targetType,
+    targetId,
+    newsId: targetType === "news" ? targetId : undefined,
+    insightId: targetType === "insight" ? targetId : undefined,
   };
 }
 
@@ -220,6 +258,28 @@ export function getNewsCommentContext({ dbPath, newsId }) {
 
     const title = nonEmptyString(row.title);
     const source = nonEmptyString(row.source);
+    if (!title && !source) return null;
+
+    return { title, source };
+  } finally {
+    db.close();
+  }
+}
+
+
+export function getInsightCommentContext({ dbPath, insightId }) {
+  if (!Number.isInteger(insightId) || insightId <= 0) return null;
+
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    const row = db
+      .prepare("SELECT title, insight_type FROM insights WHERE id = ? LIMIT 1")
+      .get(insightId);
+    if (!row || typeof row !== "object") return null;
+
+    const title = nonEmptyString(row.title);
+    const source = nonEmptyString(row.insight_type);
     if (!title && !source) return null;
 
     return { title, source };
@@ -256,6 +316,111 @@ export function getFeedbackCounts({ dbPath, newsId }) {
   } finally {
     db.close();
   }
+}
+
+
+export function getInsightFeedbackCounts({ dbPath, insightId }) {
+  if (!Number.isInteger(insightId) || insightId <= 0) {
+    return { useful: 0, boring: 0, comments: 0 };
+  }
+
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    ensureInsightFeedbackTables(db);
+    const rows = db
+      .prepare(`
+        SELECT action, COUNT(*) AS count
+        FROM insight_feedback
+        WHERE insight_id = ?
+          AND action IN ('useful', 'boring', 'comment')
+        GROUP BY action
+      `)
+      .all(insightId);
+
+    const counts = { useful: 0, boring: 0, comments: 0 };
+    for (const row of rows) {
+      if (row.action === "useful") counts.useful = Number(row.count || 0);
+      if (row.action === "boring") counts.boring = Number(row.count || 0);
+      if (row.action === "comment") counts.comments = Number(row.count || 0);
+    }
+    return counts;
+  } finally {
+    db.close();
+  }
+}
+
+export async function saveInsightFeedback({ dbPath, insightId, userId, username, action, comment }) {
+  if (!Number.isInteger(insightId) || insightId <= 0) {
+    throw new Error("Invalid insight id");
+  }
+  if (!["useful", "boring", "comment"].includes(action)) {
+    throw new Error("Invalid feedback action");
+  }
+
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    ensureInsightFeedbackTables(db);
+    const row = db
+      .prepare("SELECT gosb_id FROM insights WHERE id = ? LIMIT 1")
+      .get(insightId);
+    const gosbId = row && typeof row === "object" ? row.gosb_id : null;
+    const normalizedUserId = String(userId ?? "");
+
+    if (action === "useful" || action === "boring") {
+      const existing = db
+        .prepare(`
+          SELECT id, action
+          FROM insight_feedback
+          WHERE insight_id = ?
+            AND user_id = ?
+            AND action IN ('useful', 'boring')
+          ORDER BY id DESC
+          LIMIT 1
+        `)
+        .get(insightId, normalizedUserId);
+
+      if (existing && typeof existing === "object") {
+        if (existing.action === action) {
+          db.prepare(`
+            DELETE FROM insight_feedback
+            WHERE insight_id = ?
+              AND user_id = ?
+              AND action IN ('useful', 'boring')
+          `).run(insightId, normalizedUserId);
+          return { status: "removed", action };
+        }
+
+        db.prepare(`
+          UPDATE insight_feedback
+          SET gosb_id = ?,
+              username = ?,
+              action = ?,
+              comment = NULL,
+              created_at = datetime('now')
+          WHERE id = ?
+        `).run(gosbId ?? null, String(username ?? ""), action, existing.id);
+        return { status: "updated", previousAction: existing.action, action };
+      }
+    }
+
+    db.prepare(`
+      INSERT INTO insight_feedback (gosb_id, insight_id, user_id, username, action, comment)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      gosbId ?? null,
+      insightId,
+      normalizedUserId,
+      String(username ?? ""),
+      action,
+      comment ? String(comment) : null,
+    );
+  } finally {
+    db.close();
+  }
+
+  return { status: "inserted", action };
 }
 
 export async function saveFeedback({ dbPath, newsId, userId, username, action, comment }) {
@@ -406,7 +571,10 @@ export function rememberPendingComment(params) {
   const state = readPendingFile(pendingPath);
   const now = params.now ?? Date.now();
   state[key] = {
+    targetType: params.targetType ?? "news",
+    targetId: params.targetId ?? params.newsId ?? params.insightId,
     newsId: params.newsId,
+    insightId: params.insightId,
     accountId: nonEmptyString(params.accountId) ?? "default",
     conversationId: params.conversationId,
     senderId: params.senderId,
@@ -435,6 +603,12 @@ export function consumePendingComment(params) {
 
   const now = params.now ?? Date.now();
   if (typeof entry.expiresAt === "number" && entry.expiresAt < now) return null;
-  if (!Number.isInteger(entry.newsId) || entry.newsId <= 0) return null;
+  const targetType = nonEmptyString(entry.targetType) ?? "news";
+  const targetId = Number(entry.targetId ?? entry.newsId ?? entry.insightId);
+  if (!Number.isInteger(targetId) || targetId <= 0) return null;
+  entry.targetType = targetType;
+  entry.targetId = targetId;
+  if (targetType === "insight") entry.insightId = targetId;
+  else entry.newsId = targetId;
   return entry;
 }

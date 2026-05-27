@@ -117,6 +117,7 @@ assert len(messages) == 2
 assert messages[0][2] == "99"
 assert "Инсайты к действиям" in messages[0][1]
 assert "Проверить потенциал" in messages[1][1]
+assert messages[1][3]["inline_keyboard"][0][0]["callback_data"] == "iuseful:1"
 
 messages.clear()
 insights.INSIGHTS_THREAD_ID = ""
@@ -125,6 +126,7 @@ assert insights.send_insights("run-1") == 1
 assert len(messages) == 2
 assert messages[0][2] == "136"
 assert "Самарский ГОСБ" in messages[0][1]
+assert messages[1][3]["inline_keyboard"][0][2]["callback_data"] == "icomment:1"
 
 Path(path).unlink(missing_ok=True)
 print("insights ok")

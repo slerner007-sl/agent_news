@@ -432,6 +432,16 @@ def _insight_news_titles(insight_id: int) -> list[str]:
     return [f"{row['title']} ({row['source'] or '-'})" for row in rows]
 
 
+def build_insight_keyboard(insight_id: int, useful: int = 0, boring: int = 0, comments: int = 0) -> dict:
+    return {
+        "inline_keyboard": [[
+            {"text": f"✅ {useful}", "callback_data": f"iuseful:{insight_id}"},
+            {"text": f"👎 {boring}", "callback_data": f"iboring:{insight_id}"},
+            {"text": f"💬 {comments}", "callback_data": f"icomment:{insight_id}"},
+        ]]
+    }
+
+
 def format_insight_message(insight: dict) -> str:
     priority_label = "высокий" if insight["priority"] == "high" else "средний"
     news_titles = _insight_news_titles(insight["id"])
@@ -483,7 +493,7 @@ def send_insights(run_id: str) -> int:
             thread_id,
         )
         for insight in bucket:
-            if _send_message(chat_id, format_insight_message(insight), thread_id):
+            if _send_message(chat_id, format_insight_message(insight), thread_id, reply_markup=build_insight_keyboard(insight["id"])):
                 sent += 1
 
     if skipped:

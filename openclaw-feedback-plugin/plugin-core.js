@@ -7,6 +7,8 @@ import { DatabaseSync } from "node:sqlite";
 import {
   consumePendingComment,
   getFeedbackCounts,
+  getInsightCommentContext,
+  getInsightFeedbackCounts,
   getNewsCommentContext,
   parseFeedbackCallback,
   rememberPendingComment,
@@ -14,6 +16,7 @@ import {
   resolveDbPath,
   resolvePendingPath,
   saveFeedback,
+  saveInsightFeedback,
   saveKnowledgeDocument,
 } from "./feedback-store.js";
 
@@ -74,15 +77,17 @@ function truncateText(value, maxLength) {
   return text.slice(0, maxLength - 3).trimEnd() + "...";
 }
 
-function formatCommentPrompt(newsContext) {
-  const title = truncateText(newsContext?.title, COMMENT_TITLE_MAX_LENGTH) || "выбранная новость";
-  return ["Комментарий к новости:", title, "", "Ответь на это сообщение."].join("\n");
+function formatCommentPrompt(targetContext, targetType = "news") {
+  const title = truncateText(targetContext?.title, COMMENT_TITLE_MAX_LENGTH) || (targetType === "insight" ? "выбранный инсайт" : "выбранная новость");
+  const label = targetType === "insight" ? "Комментарий к инсайту:" : "Комментарий к новости:";
+  return [label, title, "", "Ответь на это сообщение."].join("\n");
 }
 
-function formatSavedCommentText(newsContext) {
-  const title = truncateText(newsContext?.title, COMMENT_TITLE_MAX_LENGTH);
+function formatSavedCommentText(targetContext, targetType = "news") {
+  const title = truncateText(targetContext?.title, COMMENT_TITLE_MAX_LENGTH);
   if (!title) return "Комментарий сохранен.";
-  return ["Комментарий сохранен:", title].join("\n");
+  const label = targetType === "insight" ? "Комментарий к инсайту сохранен:" : "Комментарий сохранен:";
+  return [label, title].join("\n");
 }
 
 function normalizeButtonText(value) {
@@ -530,20 +535,38 @@ async function answerCallbackToast(ctx, pluginConfig, text) {
   }
 }
 
-function buildFeedbackButtons(newsId, counts) {
+function buildFeedbackButtons(targetType, targetId, counts) {
+  const prefix = targetType === "insight" ? "i" : "";
   return [[
-    { text: "✅ " + counts.useful, callback_data: "useful:" + newsId },
-    { text: "👎 " + counts.boring, callback_data: "boring:" + newsId },
-    { text: "💬 " + counts.comments, callback_data: "comment:" + newsId },
+    { text: "✅ " + counts.useful, callback_data: prefix + "useful:" + targetId },
+    { text: "👎 " + counts.boring, callback_data: prefix + "boring:" + targetId },
+    { text: "💬 " + counts.comments, callback_data: prefix + "comment:" + targetId },
   ]];
 }
 
-async function updateFeedbackButtons(ctx, dbPath, newsId) {
+function getTargetFeedbackCounts(dbPath, targetType, targetId) {
+  if (targetType === "insight") return getInsightFeedbackCounts({ dbPath, insightId: targetId });
+  return getFeedbackCounts({ dbPath, newsId: targetId });
+}
+
+function getTargetCommentContext(dbPath, targetType, targetId) {
+  if (targetType === "insight") return getInsightCommentContext({ dbPath, insightId: targetId });
+  return getNewsCommentContext({ dbPath, newsId: targetId });
+}
+
+async function saveTargetFeedback({ dbPath, targetType, targetId, userId, username, action, comment }) {
+  if (targetType === "insight") {
+    return saveInsightFeedback({ dbPath, insightId: targetId, userId, username, action, comment });
+  }
+  return saveFeedback({ dbPath, newsId: targetId, userId, username, action, comment });
+}
+
+async function updateFeedbackButtons(ctx, dbPath, targetType, targetId) {
   if (typeof ctx.respond?.editButtons !== "function") return false;
 
   try {
-    const counts = getFeedbackCounts({ dbPath, newsId });
-    await ctx.respond.editButtons({ buttons: buildFeedbackButtons(newsId, counts) });
+    const counts = getTargetFeedbackCounts(dbPath, targetType, targetId);
+    await ctx.respond.editButtons({ buttons: buildFeedbackButtons(targetType, targetId, counts) });
     return true;
   } catch {
     return false;
@@ -590,14 +613,16 @@ async function updateFeedbackButtonsByMessage(pluginConfig, dbPath, pending) {
   }
 
   try {
-    const counts = getFeedbackCounts({ dbPath, newsId: pending.newsId });
+    const targetType = cleanText(pending.targetType) || "news";
+    const targetId = Number(pending.targetId ?? pending.newsId ?? pending.insightId);
+    const counts = getTargetFeedbackCounts(dbPath, targetType, targetId);
     const response = await fetch("https://api.telegram.org/bot" + token + "/editMessageReplyMarkup", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
         message_id: messageId,
-        reply_markup: { inline_keyboard: buildFeedbackButtons(pending.newsId, counts) },
+        reply_markup: { inline_keyboard: buildFeedbackButtons(targetType, targetId, counts) },
       }),
     });
     if (!response.ok) return false;
@@ -675,6 +700,8 @@ export async function handleFeedbackCallback(ctx, pluginConfig = {}) {
   const pendingPath = resolvePendingPath(pluginConfig);
   const senderId = cleanText(ctx.senderId);
   const senderUsername = cleanText(ctx.senderUsername);
+  const targetType = parsed.targetType || "news";
+  const targetId = Number(parsed.targetId ?? parsed.newsId ?? parsed.insightId);
 
   if (!senderId) {
     await answerCallbackToast(ctx, pluginConfig, "Не смог определить пользователя.");
@@ -686,7 +713,10 @@ export async function handleFeedbackCallback(ctx, pluginConfig = {}) {
     const ok = rememberPendingComment({
       pendingPath,
       ttlMs: resolveCommentTtlMs(pluginConfig),
-      newsId: parsed.newsId,
+      targetType,
+      targetId,
+      newsId: targetType === "news" ? targetId : undefined,
+      insightId: targetType === "insight" ? targetId : undefined,
       accountId: ctx.accountId,
       conversationId: ctx.conversationId,
       senderId,
@@ -697,35 +727,37 @@ export async function handleFeedbackCallback(ctx, pluginConfig = {}) {
     });
 
     if (!ok) {
-      await answerCallbackToast(ctx, pluginConfig, "Не смог запомнить новость.");
-      await ctx.respond.reply({ text: "Не смог запомнить новость для комментария." });
+      const targetLabel = targetType === "insight" ? "инсайт" : "новость";
+      await answerCallbackToast(ctx, pluginConfig, "Не смог запомнить " + targetLabel + ".");
+      await ctx.respond.reply({ text: "Не смог запомнить " + targetLabel + " для комментария." });
       return { handled: true };
     }
 
-    let newsContext = null;
+    let targetContext = null;
     try {
-      newsContext = getNewsCommentContext({ dbPath, newsId: parsed.newsId });
+      targetContext = getTargetCommentContext(dbPath, targetType, targetId);
     } catch {
-      newsContext = null;
+      targetContext = null;
     }
 
     await answerCallbackToast(ctx, pluginConfig, "Ответь на сообщение бота комментарием.");
-    const promptText = formatCommentPrompt(newsContext);
+    const promptText = formatCommentPrompt(targetContext, targetType);
     const promptSent = await sendForceReplyPrompt(ctx, pluginConfig, promptText);
     if (!promptSent) await ctx.respond.reply({ text: promptText });
     return { handled: true };
   }
 
   try {
-    const result = await saveFeedback({
+    const result = await saveTargetFeedback({
       dbPath,
-      newsId: parsed.newsId,
+      targetType,
+      targetId,
       userId: senderId,
       username: senderUsername,
       action: parsed.action,
     });
     const toastText = ACTION_TOASTS[parsed.action]?.[result.status] || "Оценка сохранена.";
-    await updateFeedbackButtons(ctx, dbPath, parsed.newsId);
+    await updateFeedbackButtons(ctx, dbPath, targetType, targetId);
     await answerCallbackToast(ctx, pluginConfig, toastText);
   } catch (error) {
     const message = "Не смог сохранить оценку: " + (error instanceof Error ? error.message : String(error));
@@ -735,7 +767,6 @@ export async function handleFeedbackCallback(ctx, pluginConfig = {}) {
 
   return { handled: true };
 }
-
 
 function extractThreadId(ctx = {}) {
   return cleanText(ctx.threadId) || cleanText(ctx.conversationId).split(":topic:")[1] || "";
@@ -1063,26 +1094,29 @@ export async function handlePendingComment(event, ctx, pluginConfig = {}) {
 
   try {
     const dbPath = resolveDbPath(pluginConfig);
-    await saveFeedback({
+    const targetType = cleanText(pending.targetType) || "news";
+    const targetId = Number(pending.targetId ?? pending.newsId ?? pending.insightId);
+    await saveTargetFeedback({
       dbPath,
-      newsId: pending.newsId,
+      targetType,
+      targetId,
       userId: ctx.senderId,
       username: pending.senderUsername,
       action: "comment",
       comment,
     });
 
-    let newsContext = null;
+    let targetContext = null;
     try {
-      newsContext = getNewsCommentContext({ dbPath, newsId: pending.newsId });
+      targetContext = getTargetCommentContext(dbPath, targetType, targetId);
     } catch {
-      newsContext = null;
+      targetContext = null;
     }
     await updateFeedbackButtonsByMessage(pluginConfig, dbPath, pending);
 
     return {
       handled: true,
-      text: formatSavedCommentText(newsContext),
+      text: formatSavedCommentText(targetContext, targetType),
     };
   } catch (error) {
     return {
