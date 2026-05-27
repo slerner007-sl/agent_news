@@ -409,9 +409,9 @@ function formatHoldingsLine(holdings) {
 }
 
 function formatAgentsLine(agents) {
-  if (!agents.length) return "Агенты: явный реестр пока не прочитан.";
+  if (!agents.length) return "LLM-агенты: явный реестр пока не прочитан.";
   const names = agents.map((agent) => agent.name).join(", ");
-  return `Агенты: ${agents.length} явно описаны в config/agents.json: ${names}.`;
+  return `LLM-агенты: ${agents.length} явно описаны в config/agents.json: ${names}. Сбор, отправка, кнопки и загрузка файлов — сервисные модули, не агенты.`;
 }
 
 function formatGosbLine(gosbs) {
