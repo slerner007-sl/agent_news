@@ -117,6 +117,8 @@ assert len(messages) == 2
 assert messages[0][2] == "99"
 assert "Инсайты к действиям" in messages[0][1]
 assert "Проверить потенциал" in messages[1][1]
+assert "Связанные метрики" in messages[1][1]
+assert "Доля рынка КЮЛ" in messages[1][1]
 assert messages[1][3]["inline_keyboard"][0][0]["callback_data"] == "iuseful:1"
 
 messages.clear()

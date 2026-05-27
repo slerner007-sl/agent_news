@@ -232,16 +232,19 @@ def _build_prompt(gosb: dict, batch: list[dict]) -> str:
 Метрики из темы метрик:
 {get_knowledge_context("metrics", limit=10, max_chars=3200)}
 
-Методология из Базы знаний:
-{get_knowledge_context("methodology", limit=8, max_chars=2400)}
+Документы из Базы знаний: методология, бизнес-процессы, правила реагирования:
+{get_knowledge_context("methodology", limit=8, max_chars=3200)}
 
 Правила качества:
 - Верни инсайт только если есть проверяемое действие: проверить клиента/холдинг, передать сигнал РМ/КМ, посмотреть метрику, оценить риск, подготовить контакт с ЛПР.
+- Формулируй как: "На основе такой-то новости считаю, что такая-то метрика может измениться таким-то образом; рекомендую следующие шаги...".
+- Если в Базе знаний есть документы с бизнес-процессами или методологией, опирайся на них при выборе рекомендуемых действий.
 - Можно объединять несколько новостей в один инсайт, если они про один сигнал.
 - Если новость просто фон, используй no_action или не включай ее в insights.
 - Не формулируй приказ. Пиши как рекомендацию: "проверить", "передать сигнал", "оценить", "сопоставить".
-- Не придумывай метрики и факты, которых нет в новости/контексте.
+- Не придумывай метрики и факты, которых нет в новости/контексте. Если подходящей метрики нет, оставь metric_links пустым.
 - Возвращай все качественные инсайты, а не фиксированное число.
+- Учитывай, что эксперты будут размечать эти рекомендации; делай evidence и suggested_action достаточно конкретными для оценки.
 
 Типы:
 client_signal — клиент/холдинг/крупный бизнес/стройка/производство;
@@ -264,11 +267,11 @@ no_action — действие не нужно.
       "priority": "high|medium|low",
       "confidence": 0.0,
       "why_it_matters": "почему это важно для ГОСБа",
-      "suggested_action": "что стоит проверить или кому передать сигнал",
+      "suggested_action": "рекомендуемые шаги: анализ, встреча, контакт с клиентом/РМ/КМ/GR, проверка риска и т.д.",
       "owner_hint": "руководитель ГОСБа|РМ|КМ|GR|риски|аналитик",
-      "evidence": "на чем основан вывод",
+      "evidence": "на основе какой новости или группы новостей сделан вывод",
       "metric_links": [
-        {{"metric_key": "номер/название из справочника", "metric_name": "название", "impact": "positive|negative|risk|context|none", "confidence": 0.0, "reason": "почему связана"}}
+        {{"metric_key": "номер/название из справочника", "metric_name": "название", "impact": "positive|negative|risk|context|none", "confidence": 0.0, "reason": "как и почему метрика может измениться"}}
       ]
     }}
   ]
@@ -432,6 +435,32 @@ def _insight_news_titles(insight_id: int) -> list[str]:
     return [f"{row['title']} ({row['source'] or '-'})" for row in rows]
 
 
+def _insight_metric_lines(insight_id: int) -> list[str]:
+    impact_labels = {
+        "positive": "может улучшиться",
+        "negative": "может ухудшиться",
+        "risk": "риск ухудшения",
+        "context": "контекст",
+        "none": "связь не определена",
+    }
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT metric_key, metric_name, impact, confidence, reason
+            FROM insight_metric_links
+            WHERE insight_id = ?
+            ORDER BY confidence DESC, id
+            LIMIT 5
+        """, (insight_id,)).fetchall()
+    lines = []
+    for row in rows:
+        name = row["metric_name"] or row["metric_key"]
+        impact = impact_labels.get(str(row["impact"] or "context"), str(row["impact"] or "context"))
+        reason = _truncate_text(row["reason"] or "", 180)
+        suffix = f": {reason}" if reason else ""
+        lines.append(f"- {name} — {impact}{suffix}")
+    return lines
+
+
 def build_insight_keyboard(insight_id: int, useful: int = 0, boring: int = 0, comments: int = 0) -> dict:
     return {
         "inline_keyboard": [[
@@ -445,14 +474,19 @@ def build_insight_keyboard(insight_id: int, useful: int = 0, boring: int = 0, co
 def format_insight_message(insight: dict) -> str:
     priority_label = "высокий" if insight["priority"] == "high" else "средний"
     news_titles = _insight_news_titles(insight["id"])
+    metric_lines = _insight_metric_lines(insight["id"])
     evidence = insight.get("evidence") or "; ".join(news_titles)
+    metrics_block = ""
+    if metric_lines:
+        metrics_block = "\n\n<b>Связанные метрики:</b>\n" + escape("\n".join(metric_lines))
     return (
-        f"🧭 <b>Инсайт · {escape(insight['gosb_name'])}</b>\\n"
-        f"<b>{escape(insight['title'])}</b>\\n"
-        f"<i>Приоритет: {priority_label} | тип: {escape(insight['insight_type'])} | уверенность: {float(insight['confidence']):.2f}</i>\\n\\n"
-        f"<b>Почему важно:</b> {escape(_truncate_text(insight.get('why_it_matters') or '', 700))}\\n\\n"
-        f"<b>Что проверить:</b> {escape(_truncate_text(insight.get('suggested_action') or '', 800))}\\n"
-        f"<b>Кому:</b> {escape(insight.get('owner_hint') or 'аналитик')}\\n\\n"
+        f"🧭 <b>Инсайт · {escape(insight['gosb_name'])}</b>\n"
+        f"<b>{escape(insight['title'])}</b>\n"
+        f"<i>Приоритет: {priority_label} | тип: {escape(insight['insight_type'])} | уверенность: {float(insight['confidence']):.2f}</i>\n\n"
+        f"<b>Почему важно:</b> {escape(_truncate_text(insight.get('why_it_matters') or '', 700))}"
+        f"{metrics_block}\n\n"
+        f"<b>Что проверить:</b> {escape(_truncate_text(insight.get('suggested_action') or '', 800))}\n"
+        f"<b>Кому:</b> {escape(insight.get('owner_hint') or 'аналитик')}\n\n"
         f"<b>Основание:</b> {escape(_truncate_text(evidence, 650))}"
     )
 
