@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Badge,
   Card,
   Col,
   Empty,
@@ -15,6 +16,8 @@ import {
   Typography,
 } from 'antd';
 import { api, Gosb, NewsItem, Page } from '../api/client';
+import { useEventStream, SSEEvent } from '../api/useEventStream';
+import FeedbackButtons from '../components/FeedbackButtons';
 
 const { Text, Paragraph, Link } = Typography;
 const { Search } = Input;
@@ -44,9 +47,18 @@ export default function NewsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [newCount, setNewCount] = useState(0);
+
   useEffect(() => {
     api.listGosbs().then((r) => setGosbs(r.items)).catch(() => {});
   }, []);
+
+  const handleSSE = useCallback((evt: SSEEvent) => {
+    if (evt.type === 'news:new') {
+      setNewCount((prev) => prev + evt.count);
+    }
+  }, []);
+  useEventStream(handleSSE);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +148,21 @@ export default function NewsPage() {
         </Row>
       </Card>
 
+      {newCount > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          message={`${newCount} новых новостей`}
+          action={
+            <Badge count={newCount} size="small">
+              <a onClick={() => { setNewCount(0); setPage(1); }}>Обновить</a>
+            </Badge>
+          }
+          closable
+          onClose={() => setNewCount(0)}
+        />
+      )}
+
       {error && <Alert type="error" showIcon message={error} />}
 
       {loading && !data && (
@@ -196,6 +223,7 @@ export default function NewsPage() {
                       {f.action}{f.username ? ` · @${f.username}` : ''}{f.comment ? `: ${f.comment}` : ''}
                     </Tag>
                   ))}
+                  <FeedbackButtons targetType="news" targetId={n.id} />
                 </Space>
               </Col>
             </Row>

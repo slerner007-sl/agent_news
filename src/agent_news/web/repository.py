@@ -1,12 +1,15 @@
-"""Read-mostly repository over the agent_news SQLite database.
+"""Repository over the agent_news SQLite database.
 
 All web API queries go through this module so the existing runtime code in
-``src/agent_news`` keeps owning the schema. We only ever open the database
-read-only here — write operations stay in the cron / bot pipelines.
+``src/agent_news`` keeps owning the schema.  Read queries use a read-only
+connection; write operations (feedback, knowledge upload) use a separate
+read-write connection with WAL mode and busy_timeout to coexist with the
+cron / bot pipelines that write to the same database.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -20,16 +23,36 @@ def _db_path() -> Path:
 
 
 def _connect() -> sqlite3.Connection:
+    """Read-only connection for all GET queries."""
     path = _db_path()
     if not path.exists():
         raise FileNotFoundError(
             f"Agent News database not found at {path}. "
             "Run the digest pipeline at least once or point AGENT_NEWS_DB at the right file."
         )
-    # Open read-only to avoid accidental writes from the web layer.
     uri = f"file:{path.as_posix()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _connect_rw() -> sqlite3.Connection:
+    """Read-write connection for feedback / knowledge writes.
+
+    Uses WAL journal mode and a 5-second busy timeout so concurrent
+    writes from the cron pipeline or Telegram plugin don't cause
+    immediate SQLITE_BUSY errors.
+    """
+    path = _db_path()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Agent News database not found at {path}. "
+            "Run the digest pipeline at least once or point AGENT_NEWS_DB at the right file."
+        )
+    conn = sqlite3.connect(str(path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -498,4 +521,221 @@ def stats_summary(*, since_hours: int = 168) -> dict[str, Any]:
         "feedback_breakdown": feedback_breakdown,
         "latest_runs": latest_runs,
         "news_timeline": timeline,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Feedback writes (replicates toggle logic from openclaw-feedback plugin)
+# ---------------------------------------------------------------------------
+
+def save_feedback(
+    news_id: int,
+    user_id: str,
+    username: str,
+    action: str,
+    comment: str | None = None,
+) -> dict[str, Any]:
+    """Save news feedback with toggle semantics.
+
+    * useful / boring: same user + same action = remove (toggle off),
+      different action = update, new = insert.
+    * comment: always insert (multiple comments allowed).
+
+    Returns ``{"status": "inserted"|"updated"|"removed", "action": ...}``.
+    """
+    if action not in ("useful", "boring", "comment"):
+        raise ValueError(f"Invalid action: {action}")
+
+    with _connect_rw() as conn:
+        if action == "comment":
+            conn.execute(
+                "INSERT INTO feedback (news_id, user_id, username, action, comment) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (news_id, user_id, username, action, comment),
+            )
+            return {"status": "inserted", "action": action}
+
+        existing = conn.execute(
+            "SELECT id, action FROM feedback WHERE news_id = ? AND user_id = ? "
+            "AND action IN ('useful', 'boring')",
+            (news_id, user_id),
+        ).fetchone()
+
+        if existing is None:
+            conn.execute(
+                "INSERT INTO feedback (news_id, user_id, username, action) "
+                "VALUES (?, ?, ?, ?)",
+                (news_id, user_id, username, action),
+            )
+            return {"status": "inserted", "action": action}
+
+        if existing["action"] == action:
+            conn.execute("DELETE FROM feedback WHERE id = ?", (existing["id"],))
+            return {"status": "removed", "action": action}
+
+        conn.execute(
+            "UPDATE feedback SET action = ?, username = ? WHERE id = ?",
+            (action, username, existing["id"]),
+        )
+        return {"status": "updated", "action": action}
+
+
+def save_insight_feedback(
+    insight_id: int,
+    user_id: str,
+    username: str,
+    action: str,
+    comment: str | None = None,
+) -> dict[str, Any]:
+    """Same toggle logic as save_feedback but for insight_feedback table."""
+    if action not in ("useful", "boring", "comment"):
+        raise ValueError(f"Invalid action: {action}")
+
+    with _connect_rw() as conn:
+        if action == "comment":
+            conn.execute(
+                "INSERT INTO insight_feedback (insight_id, user_id, username, action, comment) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (insight_id, user_id, username, action, comment),
+            )
+            return {"status": "inserted", "action": action}
+
+        existing = conn.execute(
+            "SELECT id, action FROM insight_feedback WHERE insight_id = ? AND user_id = ? "
+            "AND action IN ('useful', 'boring')",
+            (insight_id, user_id),
+        ).fetchone()
+
+        if existing is None:
+            conn.execute(
+                "INSERT INTO insight_feedback (insight_id, user_id, username, action) "
+                "VALUES (?, ?, ?, ?)",
+                (insight_id, user_id, username, action),
+            )
+            return {"status": "inserted", "action": action}
+
+        if existing["action"] == action:
+            conn.execute("DELETE FROM insight_feedback WHERE id = ?", (existing["id"],))
+            return {"status": "removed", "action": action}
+
+        conn.execute(
+            "UPDATE insight_feedback SET action = ?, username = ? WHERE id = ?",
+            (action, username, existing["id"]),
+        )
+        return {"status": "updated", "action": action}
+
+
+def get_feedback_counts(news_id: int) -> dict[str, int]:
+    with _connect() as conn:
+        useful = conn.execute(
+            "SELECT COUNT(*) FROM feedback WHERE news_id = ? AND action = 'useful'",
+            (news_id,),
+        ).fetchone()[0]
+        boring = conn.execute(
+            "SELECT COUNT(*) FROM feedback WHERE news_id = ? AND action = 'boring'",
+            (news_id,),
+        ).fetchone()[0]
+        comments = conn.execute(
+            "SELECT COUNT(*) FROM feedback WHERE news_id = ? AND action = 'comment'",
+            (news_id,),
+        ).fetchone()[0]
+    return {"useful": useful, "boring": boring, "comments": comments}
+
+
+def get_insight_feedback_counts(insight_id: int) -> dict[str, int]:
+    with _connect() as conn:
+        useful = conn.execute(
+            "SELECT COUNT(*) FROM insight_feedback WHERE insight_id = ? AND action = 'useful'",
+            (insight_id,),
+        ).fetchone()[0]
+        boring = conn.execute(
+            "SELECT COUNT(*) FROM insight_feedback WHERE insight_id = ? AND action = 'boring'",
+            (insight_id,),
+        ).fetchone()[0]
+        comments = conn.execute(
+            "SELECT COUNT(*) FROM insight_feedback WHERE insight_id = ? AND action = 'comment'",
+            (insight_id,),
+        ).fetchone()[0]
+    return {"useful": useful, "boring": boring, "comments": comments}
+
+
+# ---------------------------------------------------------------------------
+# Knowledge writes (replicates dedup logic from openclaw-feedback plugin)
+# ---------------------------------------------------------------------------
+
+def save_knowledge_document(
+    kind: str,
+    content_text: str,
+    source_type: str = "text",
+    sender_id: str | None = None,
+    username: str | None = None,
+    file_name: str | None = None,
+    mime_type: str | None = None,
+    source_key: str | None = None,
+) -> dict[str, Any]:
+    """Save a knowledge document with SHA256-based deduplication.
+
+    * Same source_key + same content_hash → skip (duplicate).
+    * Same source_key + different hash → replace (update).
+    * New source_key → insert.
+    """
+    if kind not in ("metrics", "methodology"):
+        raise ValueError(f"Invalid kind: {kind}")
+
+    content_hash = hashlib.sha256(content_text.encode()).hexdigest()
+    if not source_key:
+        source_key = file_name or content_hash[:16]
+
+    with _connect_rw() as conn:
+        # Check for exact duplicate
+        dup = conn.execute(
+            "SELECT id FROM knowledge_documents "
+            "WHERE kind = ? AND source_key = ? AND content_hash = ?",
+            (kind, source_key, content_hash),
+        ).fetchone()
+        if dup:
+            return {"status": "duplicate", "id": dup["id"]}
+
+        # Delete previous versions with same source_key
+        prev = conn.execute(
+            "SELECT id FROM knowledge_documents WHERE kind = ? AND source_key = ?",
+            (kind, source_key),
+        ).fetchone()
+
+        if prev:
+            conn.execute(
+                "DELETE FROM knowledge_documents WHERE kind = ? AND source_key = ?",
+                (kind, source_key),
+            )
+
+        conn.execute(
+            "INSERT INTO knowledge_documents "
+            "(kind, sender_id, username, source_type, file_name, mime_type, "
+            " content_text, source_key, content_hash, revision, is_current) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)",
+            (kind, sender_id, username, source_type, file_name, mime_type,
+             content_text, source_key, content_hash),
+        )
+        new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        status = "updated" if prev else "inserted"
+
+    return {"status": status, "id": new_id}
+
+
+# ---------------------------------------------------------------------------
+# SSE: high-water marks for change detection
+# ---------------------------------------------------------------------------
+
+def get_watermarks() -> dict[str, int]:
+    """Return current max IDs for tables that SSE monitors."""
+    with _connect() as conn:
+        news_max = conn.execute("SELECT COALESCE(MAX(id), 0) FROM raw_news").fetchone()[0]
+        insights_max = conn.execute("SELECT COALESCE(MAX(id), 0) FROM insights").fetchone()[0]
+        feedback_max = conn.execute("SELECT COALESCE(MAX(id), 0) FROM feedback").fetchone()[0]
+        sent_max = conn.execute("SELECT COALESCE(MAX(id), 0) FROM sent_news").fetchone()[0]
+    return {
+        "news": news_max,
+        "insights": insights_max,
+        "feedback": feedback_max,
+        "sent": sent_max,
     }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, Col, Row, Statistic, Table, Tag, Alert, Spin, Typography, Space, Segmented } from 'antd';
 import {
   ReadOutlined,
@@ -9,6 +9,7 @@ import {
   SendOutlined,
 } from '@ant-design/icons';
 import { api, StatsSummary } from '../api/client';
+import { useEventStream } from '../api/useEventStream';
 
 const { Text } = Typography;
 
@@ -31,6 +32,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [refreshKey, setRefreshKey] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -47,7 +50,13 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [horizon]);
+  }, [horizon, refreshKey]);
+
+  // Auto-refresh stats when SSE reports any changes
+  const handleSSE = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+  useEventStream(handleSSE);
 
   if (loading && !data) {
     return (

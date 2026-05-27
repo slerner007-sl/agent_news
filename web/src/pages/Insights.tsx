@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Alert, Card, Col, Empty, Pagination, Row, Select, Space, Spin, Tag, Typography } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Badge, Card, Col, Empty, Pagination, Row, Select, Space, Spin, Tag, Typography } from 'antd';
 import { api, Gosb, InsightItem, Page } from '../api/client';
+import { useEventStream, SSEEvent } from '../api/useEventStream';
+import FeedbackButtons from '../components/FeedbackButtons';
 
 const { Text, Paragraph } = Typography;
 
@@ -42,9 +44,18 @@ export default function InsightsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [newCount, setNewCount] = useState(0);
+
   useEffect(() => {
     api.listGosbs().then((r) => setGosbs(r.items)).catch(() => {});
   }, []);
+
+  const handleSSE = useCallback((evt: SSEEvent) => {
+    if (evt.type === 'insights:new') {
+      setNewCount((prev) => prev + evt.count);
+    }
+  }, []);
+  useEventStream(handleSSE);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +123,21 @@ export default function InsightsPage() {
           </Col>
         </Row>
       </Card>
+
+      {newCount > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          message={`${newCount} новых инсайтов`}
+          action={
+            <Badge count={newCount} size="small">
+              <a onClick={() => { setNewCount(0); setPage(1); }}>Обновить</a>
+            </Badge>
+          }
+          closable
+          onClose={() => setNewCount(0)}
+        />
+      )}
 
       {error && <Alert type="error" message={error} showIcon />}
       {loading && !data && (
@@ -205,6 +231,7 @@ export default function InsightsPage() {
                       </Space>
                     </Card>
                   )}
+                  <FeedbackButtons targetType="insight" targetId={it.id} />
                 </Space>
               </Col>
             </Row>

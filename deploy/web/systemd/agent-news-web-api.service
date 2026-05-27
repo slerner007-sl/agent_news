@@ -15,6 +15,11 @@ Environment=AGENT_NEWS_WEB_PORT=8765
 # Environment=AGENT_NEWS_WEB_USER=radar
 # Environment=AGENT_NEWS_WEB_PASSWORD=change-me
 
+# OpenClaw agent integration (for /api/v1/chat endpoint)
+Environment=OPENCLAW_BIN=/home/user1/.npm-global/bin/openclaw
+Environment=OPENCLAW_MODEL=openai/gpt-5.5
+Environment=OPENCLAW_TIMEOUT=240
+
 # Use the project's venv if you have one. Plain python3 also works.
 ExecStart=/usr/bin/python3 -m agent_news.web
 

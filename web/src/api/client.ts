@@ -131,6 +131,27 @@ export interface StatsSummary {
   news_timeline: { day: string; n: number }[];
 }
 
+export interface FeedbackCounts {
+  useful: number;
+  boring: number;
+  comments: number;
+}
+
+export interface FeedbackResult {
+  status: 'inserted' | 'updated' | 'removed';
+  action: string;
+}
+
+export interface KnowledgeUploadResult {
+  status: 'inserted' | 'updated' | 'duplicate';
+  id?: number;
+}
+
+export interface ChatResponse {
+  response: string;
+  duration_seconds: number;
+}
+
 export const api = {
   health: () => client.get('/health').then((r) => r.data),
 
@@ -165,6 +186,31 @@ export const api = {
 
   listKnowledge: (params: { kind?: string; limit?: number; offset?: number } = {}) =>
     client.get<Page<KnowledgeItem>>('/api/v1/knowledge', { params }).then((r) => r.data),
+
+  // --- Write operations ---
+
+  submitFeedback: (newsId: number, action: string, comment?: string) =>
+    client.post<FeedbackResult>(`/api/v1/feedback/news/${newsId}`, { action, comment }).then((r) => r.data),
+
+  submitInsightFeedback: (insightId: number, action: string, comment?: string) =>
+    client.post<FeedbackResult>(`/api/v1/feedback/insights/${insightId}`, { action, comment }).then((r) => r.data),
+
+  getFeedbackCounts: (newsId: number) =>
+    client.get<FeedbackCounts>(`/api/v1/feedback/news/${newsId}/counts`).then((r) => r.data),
+
+  getInsightFeedbackCounts: (insightId: number) =>
+    client.get<FeedbackCounts>(`/api/v1/feedback/insights/${insightId}/counts`).then((r) => r.data),
+
+  uploadKnowledge: (kind: string, file?: File, text?: string) => {
+    const form = new FormData();
+    form.append('kind', kind);
+    if (file) form.append('file', file);
+    if (text) form.append('text', text);
+    return client.post<KnowledgeUploadResult>('/api/v1/knowledge/upload', form).then((r) => r.data);
+  },
+
+  sendChat: (message: string) =>
+    client.post<ChatResponse>('/api/v1/chat', { message }, { timeout: 300_000 }).then((r) => r.data),
 };
 
 export default client;

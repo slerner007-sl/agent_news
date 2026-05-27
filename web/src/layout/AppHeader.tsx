@@ -9,6 +9,7 @@ import {
   BookOutlined,
   SettingOutlined,
   RadarChartOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 
 const { Header } = Layout;
@@ -26,6 +27,7 @@ const items = [
   { key: 'gosbs', path: '/gosbs', icon: <TeamOutlined />, label: 'ГОСБ' },
   { key: 'feedback', path: '/feedback', icon: <MessageOutlined />, label: 'Обратная связь' },
   { key: 'knowledge', path: '/knowledge', icon: <BookOutlined />, label: 'База знаний' },
+  { key: 'chat', path: '/chat', icon: <RobotOutlined />, label: 'Агент' },
   { key: 'settings', path: '/settings', icon: <SettingOutlined />, label: 'Настройки' },
 ];
 

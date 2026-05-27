@@ -43,16 +43,20 @@ export default function SettingsPage() {
             <Descriptions.Item label="Путь к БД">{health.db_path}</Descriptions.Item>
             <Descriptions.Item label="БД существует">{health.db_exists ? 'да' : 'нет'}</Descriptions.Item>
             <Descriptions.Item label="Размер БД">{health.db_size_bytes} байт</Descriptions.Item>
+            <Descriptions.Item label="Режим">
+              <Tag color="blue">Чтение и запись</Tag>
+            </Descriptions.Item>
           </Descriptions>
         </Card>
       )}
 
-      <Card title="Как менять данные">
-        <Text>
-          Эта диспетчерская работает <b>в режиме чтения</b>. Чтобы добавить ГОСБ или обновить источники,
-          используйте скрипты в <code>scripts/</code> или существующий Telegram-бот. После их работы
-          веб-морда автоматически подхватит изменения.
-        </Text>
+      <Card title="Возможности">
+        <Space direction="vertical" size={4}>
+          <Text>Обратная связь (лайк / дизлайк / комментарий) на новости и инсайты.</Text>
+          <Text>Загрузка документов (метрики, методология) в базу знаний.</Text>
+          <Text>Общение с OpenClaw-агентом через страницу "Агент".</Text>
+          <Text>Обновления в реальном времени через SSE (без перезагрузки страницы).</Text>
+        </Space>
       </Card>
     </Space>
   );

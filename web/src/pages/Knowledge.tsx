@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, Card, Col, Empty, Row, Select, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Drawer, Empty, Row, Select, Space, Spin, Tag, Typography } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { api, KnowledgeItem, Page } from '../api/client';
+import KnowledgeUploadForm from '../components/KnowledgeUploadForm';
 
 const { Text, Paragraph } = Typography;
 
@@ -17,6 +19,8 @@ export default function KnowledgePage() {
   const [data, setData] = useState<Page<KnowledgeItem> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,14 +34,28 @@ export default function KnowledgePage() {
     return () => {
       cancelled = true;
     };
-  }, [kind]);
+  }, [kind, refreshKey]);
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <div>
-        <div className="section-title">База знаний</div>
-        <Text className="dim">Документы и заметки, загруженные через openclaw-feedback плагин.</Text>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div className="section-title">База знаний</div>
+          <Text className="dim">Документы и заметки, загруженные через Telegram или веб-интерфейс.</Text>
+        </div>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>
+          Загрузить
+        </Button>
       </div>
+
+      <Drawer
+        title="Загрузить документ"
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        width={480}
+      >
+        <KnowledgeUploadForm onSuccess={() => { setUploadOpen(false); setRefreshKey((k) => k + 1); }} />
+      </Drawer>
       <Card>
         <Row gutter={[12, 12]}>
           <Col xs={24} md={8}>

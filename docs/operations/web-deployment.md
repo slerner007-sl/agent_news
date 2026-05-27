@@ -121,7 +121,7 @@ curl -sSI http://127.0.0.1:8080/
 # 1. API через systemd
 sudo cp deploy/web/systemd/agent-news-web-api.service /etc/systemd/system/
 sudo nano /etc/systemd/system/agent-news-web-api.service   # выставить User/пути
-pip3 install --user fastapi 'uvicorn[standard]'
+pip3 install --user fastapi 'uvicorn[standard]' python-multipart
 sudo systemctl daemon-reload
 sudo systemctl enable --now agent-news-web-api
 sudo systemctl status agent-news-web-api
@@ -178,12 +178,25 @@ sudo systemctl start agent-news-web-api
 - [ ] Логин/пароль из nginx работает.
 - [ ] На странице **Сводка** видны цифры — значит API читает БД.
 - [ ] В **Новостях** появляется поток с фильтрами по ГОСБ.
+- [ ] В **Новостях** кнопки лайк/дизлайк/комментарий работают.
 - [ ] В **Инсайтах** видны управленческие сигналы (если они уже сгенерированы).
-- [ ] `docker compose logs` или `journalctl -u agent-news-web-api` чистые.
+- [ ] **База знаний** — кнопка «Загрузить» → документ появляется в списке.
+- [ ] **Агент** — отправка сообщения, ответ приходит (может занять до 4 минут).
+- [ ] SSE: новости/инсайты появляются без перезагрузки страницы.
+- [ ] `journalctl -u agent-news-web-api` — чисто, без ошибок.
 
-## 10. Что НЕ делает эта диспетчерская (важно)
+## 10. Что делает эта диспетчерская
 
-- Не пишет в БД и не запускает парсеры.
+- Показывает новости, инсайты, фидбек, базу знаний (read).
+- Принимает обратную связь (лайк/дизлайк/комменты) — пишет в ту же БД,
+  в том же формате, что и Telegram-плагин.
+- Загружает документы (метрики, методология) в базу знаний.
+- Чат с OpenClaw-агентом через subprocess.
+- Обновления в реальном времени через SSE.
+
+## 11. Что НЕ делает (важно)
+
+- Не запускает парсеры и cron-пайплайн.
 - Не отправляет ничего в Telegram.
 - Не выдаёт «сырые» секреты (`llm_raw_json` и сессия в БД остаются на сервере).
 

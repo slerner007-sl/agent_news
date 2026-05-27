@@ -10,6 +10,7 @@ import GosbsPage from './pages/Gosbs';
 import FeedbackPage from './pages/Feedback';
 import KnowledgePage from './pages/Knowledge';
 import SettingsPage from './pages/Settings';
+import ChatPage from './pages/Chat';
 import { api } from './api/client';
 
 const { Content } = Layout;
@@ -74,6 +75,7 @@ function Shell() {
             <Route path="/gosbs" element={<GosbsPage />} />
             <Route path="/feedback" element={<FeedbackPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
+            <Route path="/chat" element={<ChatPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

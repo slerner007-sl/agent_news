@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .. import db as _db
-from .routes import feedback, gosbs, insights, knowledge, news, stats
+from .routes import chat, events, feedback, gosbs, insights, knowledge, news, stats
 
 
 def _cors_origins() -> list[str]:
@@ -32,8 +32,9 @@ def create_app() -> FastAPI:
         title="Agent News Dashboard API",
         version="0.1.0",
         description=(
-            "Read-mostly API on top of the OpenClaw / Agent News SQLite database. "
-            "Powers the React dashboard in web/."
+            "Interactive API on top of the OpenClaw / Agent News SQLite database. "
+            "Powers the React dashboard in web/. Supports feedback, knowledge "
+            "upload, SSE real-time events, and chat with the OpenClaw agent."
         ),
     )
 
@@ -45,7 +46,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for module in (news, insights, gosbs, feedback, knowledge, stats):
+    for module in (news, insights, gosbs, feedback, knowledge, stats, events, chat):
         app.include_router(module.router, prefix="/api/v1")
 
     @app.get("/health")
