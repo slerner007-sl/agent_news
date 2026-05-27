@@ -232,7 +232,7 @@ try {
     pluginConfig,
   );
   assert.equal(infoResult.handled, true);
-  assert.match(infoResult.text, /Я новостной бот для 2 региональных ГОСБов/);
+  assert.match(infoResult.text, /Я интеллектуальный помощник для управляющих 2 региональных ГОСБов/);
   assert.match(infoResult.text, /ГОСБы: 2 активных: Самарский ГОСБ, Калининградский ГОСБ/);
   assert.match(infoResult.text, /Регионы: Самара, Самарская область; Калининградская область/);
   assert.match(infoResult.text, /Источники по регионам: Самарская область — 2/);
@@ -268,6 +268,16 @@ try {
   assert.equal(metricsInfoResult.handled, true);
   assert.match(metricsInfoResult.text, /metrics\.xlsx, 2 метрик/);
   assert.match(metricsInfoResult.text, /10000190 — Динамика CIR/);
+  assert.equal(metricsInfoResult.reply, undefined);
+
+  const naturalMetricsInfoResult = await handleMetricsInfoRequest(
+    { channel: "telegram", bodyForAgent: "какие есть метрики?" },
+    { conversationId: "-1001:topic:2" },
+    pluginConfig,
+  );
+  assert.equal(naturalMetricsInfoResult.handled, true);
+  assert.match(naturalMetricsInfoResult.text, /metrics\.xlsx, 2 метрик/);
+  assert.equal(naturalMetricsInfoResult.reply, undefined);
 
   const directMetricsInfoResult = await handleMetricsInfoRequest(
     { channel: "telegram", content: "/metrics" },
@@ -285,6 +295,15 @@ try {
   );
   assert.equal(metricsResult.handled, true);
   assert.match(metricsResult.text, /Метрики принял/);
+  assert.match(metricsResult.text, /Текст как метрику не сохраняю/);
+
+  const metricsContextResult = await handleKnowledgeMessage(
+    { channel: "telegram", content: "CSV файл использовать только как пример диапазонов значений метрик, фактические значения пришлем отдельно." },
+    { conversationId: "-1001:topic:2", senderId: "100", senderUsername: "stepan" },
+    pluginConfig,
+  );
+  assert.equal(metricsContextResult.handled, true);
+  assert.match(metricsContextResult.text, /Контекстных заметок: 1/);
 
   const methodologyResult = await handleKnowledgeMessage(
     { channel: "telegram", content: "Методология: влияние на риск считать высоким при росте просрочки." },
@@ -293,6 +312,23 @@ try {
   );
   assert.equal(methodologyResult.handled, true);
   assert.match(methodologyResult.text, /Методологию принял/);
+  assert.match(methodologyResult.text, /Сохранил как правило реакции/);
+
+  const methodologyQuestionResult = await handleKnowledgeMessage(
+    { channel: "telegram", content: "Какие документы сейчас есть в базе знаний?" },
+    { conversationId: "-1001:topic:130", senderId: "101", senderUsername: "analyst" },
+    pluginConfig,
+  );
+  assert.equal(methodologyQuestionResult.handled, true);
+  assert.match(methodologyQuestionResult.text, /Это вопрос, в базу знаний не добавляю/);
+
+  const methodologyNoiseResult = await handleKnowledgeMessage(
+    { channel: "telegram", content: "получилось?" },
+    { conversationId: "-1001:topic:130", senderId: "101", senderUsername: "analyst" },
+    pluginConfig,
+  );
+  assert.equal(methodologyNoiseResult.handled, true);
+  assert.match(methodologyNoiseResult.text, /Это вопрос, в базу знаний не добавляю|Похоже на обсуждение/);
 
   assert.equal(
     await handleKnowledgeMessage(
@@ -308,8 +344,15 @@ try {
     .all()
     .map((row) => [row.kind, row.thread_id, row.content_text]);
   assert.deepEqual(knowledgeRows, [
-    ["metrics", "2", "Доля просрочки = просроченная задолженность / кредитный портфель"],
     ["methodology", "130", "Методология: влияние на риск считать высоким при росте просрочки."],
+  ]);
+
+  const contextRows = db
+    .prepare("SELECT kind, thread_id, source_type, file_name, content_text FROM knowledge_documents WHERE source_type = 'context' ORDER BY id")
+    .all()
+    .map((row) => [row.kind, row.thread_id, row.source_type, row.file_name, row.content_text]);
+  assert.deepEqual(contextRows, [
+    ["metrics", "2", "context", "Контекст к метрикам", "CSV файл использовать только как пример диапазонов значений метрик, фактические значения пришлем отдельно."],
   ]);
 
 
@@ -328,8 +371,32 @@ try {
   );
   assert.equal(inboundResult.handled, true);
   assert.match(inboundResult.reply.text, /Файлов прочитал: 1/);
+
+  const metricsFileWithContextPath = path.join(tempDir, "metrics-with-context.txt");
+  writeFileSync(metricsFileWithContextPath, "CIR = расходы / доходы\n");
+  const inboundWithContextResult = await handleKnowledgeInboundClaim(
+    {
+      channel: "telegram",
+      content: "Этот файл использовать как пример диапазонов значений метрик.",
+      threadId: "2",
+      senderId: "102",
+      metadata: { mediaPath: metricsFileWithContextPath, mediaType: "text/plain", senderUsername: "file-user" },
+    },
+    { conversationId: "-1001:topic:2", senderId: "102" },
+    pluginConfig,
+  );
+  assert.equal(inboundWithContextResult.handled, true);
+  assert.match(inboundWithContextResult.reply.text, /Контекстных заметок: 1/);
+  const contextFileKnowledgeRow = db
+    .prepare("SELECT source_type, file_name, content_text FROM knowledge_documents WHERE source_key = 'metrics-with-context.txt'")
+    .get();
+  assert.equal(contextFileKnowledgeRow.source_type, "file");
+  assert.equal(contextFileKnowledgeRow.file_name, "metrics-with-context.txt");
+  assert.match(contextFileKnowledgeRow.content_text, /Контекст сообщения отправителя/);
+  assert.match(contextFileKnowledgeRow.content_text, /CIR = расходы/);
+
   const fileKnowledgeRow = db
-    .prepare("SELECT kind, thread_id, source_type, file_name, content_text FROM knowledge_documents ORDER BY id DESC LIMIT 1")
+    .prepare("SELECT kind, thread_id, source_type, file_name, content_text FROM knowledge_documents WHERE source_key = 'metrics.txt'")
     .get();
   assert.equal(fileKnowledgeRow.kind, "metrics");
   assert.equal(fileKnowledgeRow.thread_id, "2");
@@ -381,18 +448,30 @@ try {
   assert.equal(updatedFileRow.count, 1);
   assert.equal(updatedFileRow.file_name, "metrics-updated.txt");
 
-  assert.equal(apiCalls.length, 3);
-  assert.deepEqual(apiCalls[0].payload, {
+  assert.equal(apiCalls.length, 9);
+  assert.match(apiCalls[0].payload.text, /metrics\.xlsx, 2 метрик/);
+  assert.equal(apiCalls[0].payload.message_thread_id, 39);
+  assert.match(apiCalls[1].payload.text, /metrics\.xlsx, 2 метрик/);
+  assert.equal(apiCalls[1].payload.message_thread_id, 2);
+  assert.deepEqual(apiCalls[2].payload, {
     chat_id: "-1001",
-    text: "Метрики принял.\nДоля просрочки = просроченная задолженность / кредитный портфель",
+    text: "Метрики принял.\nТекст как метрику не сохраняю. Для загрузки метрик пришли файл.",
     disable_web_page_preview: true,
     message_thread_id: 2,
   });
-  assert.match(apiCalls[1].payload.text, /Методологию принял/);
-  assert.equal(apiCalls[1].payload.message_thread_id, 130);
-  assert.match(apiCalls[2].payload.text, /Файлов прочитал: 1/);
-  assert.equal(apiCalls[2].payload.message_thread_id, 2);
-  const apiOffset = 3;
+  assert.match(apiCalls[3].payload.text, /Контекстных заметок: 1/);
+  assert.equal(apiCalls[3].payload.message_thread_id, 2);
+  assert.match(apiCalls[4].payload.text, /Методологию принял/);
+  assert.equal(apiCalls[4].payload.message_thread_id, 130);
+  assert.match(apiCalls[5].payload.text, /Это вопрос, в базу знаний не добавляю/);
+  assert.equal(apiCalls[5].payload.message_thread_id, 130);
+  assert.match(apiCalls[6].payload.text, /Это вопрос, в базу знаний не добавляю|Похоже на обсуждение/);
+  assert.equal(apiCalls[6].payload.message_thread_id, 130);
+  assert.match(apiCalls[7].payload.text, /Файлов прочитал: 1/);
+  assert.equal(apiCalls[7].payload.message_thread_id, 2);
+  assert.match(apiCalls[8].payload.text, /Контекстных заметок: 1/);
+  assert.equal(apiCalls[8].payload.message_thread_id, 2);
+  const apiOffset = 9;
 
 
   const fallbackFilePath = path.join(tempDir, "fallback-metrics.txt");
@@ -414,7 +493,7 @@ try {
   );
   assert.deepEqual(botInfoCallbackResult, { handled: true });
   assert.equal(botInfoReplies.length, 1);
-  assert.match(botInfoReplies[0], /Я новостной бот для 2 региональных ГОСБов/);
+  assert.match(botInfoReplies[0], /Я интеллектуальный помощник для управляющих 2 региональных ГОСБов/);
   assert.deepEqual(apiCalls[apiOffset].payload, {
     callback_query_id: "botinfo-callback-id",
     text: "Показываю справку.",

@@ -52,7 +52,11 @@ const ACTION_TOASTS = {
 };
 
 const BOT_INFO_FILTER_PROMPT = `Текущий промт отбора:
-Ты — редактор банковского регионального дайджеста для конкретного ГОСБа.
+Ты — интеллектуальный помощник для управляющего ГОСБ банка.
+ГОСБ — это головное отделение банка, которое отвечает за определенный регион страны.
+Кластер — это совокупность нескольких ГОСБ, расположенных в определенной части страны.
+
+В этой задаче ты — редактор банковского регионального дайджеста для конкретного ГОСБа.
 
 Цель: отобрать новости, которые реально полезны региональному банку.
 Учитываются регион/территория ГОСБа, локальные ключевые слова и закрепленные клиентские холдинги.
@@ -113,13 +117,18 @@ function isBlockedMenuRequest(value) {
 
 function isMetricsInfoRequest(value) {
   const text = normalizeButtonText(value);
-  return [
+  if ([
     "/metrics",
     "/metrics@agent_ler_bot",
+    "metrics",
+    "metrics@agent_ler_bot",
     "метрики",
     "какие метрики",
-    "какие метрики?",
-  ].includes(text);
+    "какие есть метрики",
+    "какие метрики загружены",
+    "сколько метрик",
+  ].includes(text)) return true;
+  return /^\/?metrics(@agent_ler_bot)?(\s|$)/.test(text);
 }
 
 function parseMetricsRows(contentText) {
@@ -131,9 +140,30 @@ function parseMetricsRows(contentText) {
     if (parts.length < 6) continue;
     const [block, role, direction, category, name, number] = parts;
     if (!name || !number || name === "Наименование метрики" || name === "metric_name") continue;
+    if (!/^\d{5,8}$/.test(number)) continue;
     rows.push({ block, role, direction, category, name, number });
   }
   return rows;
+}
+
+function getBestMetricsCatalogDocument(db) {
+  const docs = db.prepare(`
+    SELECT file_name, source_key, content_text, created_at
+    FROM knowledge_documents
+    WHERE kind = 'metrics'
+      AND COALESCE(is_current, 1) = 1
+      AND source_type = 'file'
+      AND COALESCE(content_text, '') <> ''
+    ORDER BY created_at DESC
+  `).all();
+  let best = null;
+  for (const doc of docs) {
+    const rows = parseMetricsRows(doc.content_text);
+    if (!rows.length) continue;
+    const score = rows.length + (/справочник|metrics/i.test(`${doc.source_key || ""} ${doc.file_name || ""}`) ? 1000 : 0);
+    if (!best || score > best.score) best = { doc, rows, score };
+  }
+  return best;
 }
 
 function formatMetricsSummary(pluginConfig = {}) {
@@ -142,25 +172,13 @@ function formatMetricsSummary(pluginConfig = {}) {
     const db = new DatabaseSync(dbPath);
     try {
       db.exec("PRAGMA busy_timeout = 5000");
-      const doc = db.prepare(`
-        SELECT file_name, source_key, content_text, created_at
-        FROM knowledge_documents
-        WHERE kind = 'metrics'
-          AND COALESCE(is_current, 1) = 1
-          AND source_type = 'file'
-          AND COALESCE(content_text, '') <> ''
-        ORDER BY created_at DESC
-        LIMIT 1
-      `).get();
-      if (!doc) {
+      const catalog = getBestMetricsCatalogDocument(db);
+      if (!catalog) {
         return "Файл со справочником метрик пока не загружен. Пришли .xlsx в тему метрик.";
       }
 
-      const rows = parseMetricsRows(doc.content_text);
+      const { doc, rows } = catalog;
       const sourceName = cleanText(doc.source_key) || cleanText(doc.file_name) || "справочник метрик";
-      if (!rows.length) {
-        return `${sourceName}: файл загружен, но я не смог распознать строки метрик.`;
-      }
 
       const blockCounts = new Map();
       const categoryCounts = new Map();
@@ -207,7 +225,7 @@ function formatMetricsSummary(pluginConfig = {}) {
 
 export async function handleMetricsInfoRequest(event, ctx, pluginConfig = {}) {
   if (event.channel !== "telegram") return;
-  const text = event.body ?? event.content;
+  const text = eventText(event);
   if (!isMetricsInfoRequest(text)) return;
   if (!isGroupConversation(event, ctx)) {
     return {
@@ -216,10 +234,12 @@ export async function handleMetricsInfoRequest(event, ctx, pluginConfig = {}) {
     };
   }
   const textResponse = formatMetricsSummary(pluginConfig);
+  const sent = await sendKnowledgeAckMessage(event, ctx, pluginConfig, textResponse);
+  console.log(`[gosb-feedback] metrics summary request handled sent=${sent} thread=${eventThreadId(event, ctx) || "-"} text=${JSON.stringify(text).slice(0, 120)}`);
   return {
     handled: true,
     text: textResponse,
-    reply: { text: textResponse },
+    reply: sent ? undefined : { text: textResponse },
   };
 }
 
@@ -382,9 +402,9 @@ function formatRegionsLine(gosbs) {
 }
 
 function formatBotIntro(gosbs) {
-  if (!gosbs.length) return "Я новостной бот для региональных ГОСБов.";
-  if (gosbs.length === 1) return `Я новостной бот для ${gosbs[0].name}.`;
-  return `Я новостной бот для ${gosbs.length} региональных ГОСБов.`;
+  if (!gosbs.length) return "Я интеллектуальный помощник управляющего ГОСБ: слежу за новостями, метриками и управленческими сигналами.";
+  if (gosbs.length === 1) return `Я интеллектуальный помощник управляющего ${gosbs[0].name}: слежу за новостями, метриками и управленческими сигналами.`;
+  return `Я интеллектуальный помощник для управляющих ${gosbs.length} региональных ГОСБов: слежу за новостями, метриками и управленческими сигналами.`;
 }
 
 function formatBotInfoSummary(pluginConfig = {}) {
@@ -782,7 +802,19 @@ function getKnowledgeKindForThread(ctx = {}, pluginConfig = {}) {
 }
 
 function eventText(event = {}) {
-  return cleanText(event.body ?? event.bodyForAgent ?? event.content ?? event.caption ?? event.text);
+  const metadata = event.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  return cleanText(
+    event.body ??
+    event.bodyForAgent ??
+    event.content ??
+    event.caption ??
+    event.text ??
+    metadata.body ??
+    metadata.bodyForAgent ??
+    metadata.content ??
+    metadata.caption ??
+    metadata.text
+  );
 }
 
 function eventSenderUsername(event = {}, ctx = {}) {
@@ -910,14 +942,112 @@ function knowledgeSourceType(event = {}, text = "") {
   return "unknown";
 }
 
-function formatKnowledgeAck(kind, text, savedFiles = 0, fileErrors = [], duplicateFiles = 0, updatedFiles = 0) {
+function isLikelyMetricsContextNote(value) {
+  const text = normalizeButtonText(value);
+  if (!text || text.startsWith("/") || text.length < 20 || text.endsWith("?")) return false;
+  return [
+    "csv",
+    "xlsx",
+    "файл",
+    "справочник",
+    "метрик",
+    "значени",
+    "диапазон",
+    "пример",
+    "фактическ",
+    "контекст",
+    "использ",
+    "не добав",
+    "не счит",
+    "загруз",
+  ].some((marker) => text.includes(marker));
+}
+
+function isLikelyQuestionText(value) {
+  const text = normalizeButtonText(value);
+  if (!text) return false;
+  if (text.endsWith("?")) return true;
+  return [
+    "как ",
+    "что ",
+    "почему ",
+    "зачем ",
+    "можно ",
+    "нужно ли ",
+    "какие ",
+    "какая ",
+    "какой ",
+    "сколько ",
+    "где ",
+    "когда ",
+    "кто ",
+    "покажи ",
+    "расскажи ",
+    "объясни ",
+  ].some((prefix) => text.startsWith(prefix));
+}
+
+function isLikelyNoiseText(value) {
+  const text = normalizeButtonText(value);
+  if (!text) return true;
+  if (text.length < 20) return true;
+  return /^(ок|окей|да|нет|спасибо|супер|понял|принял|получилось|тест|проверка|го|ага|угу)\b/.test(text);
+}
+
+function classifyMethodologyText(value) {
+  const raw = cleanText(value);
+  const text = normalizeButtonText(raw);
+  if (!raw) {
+    return { action: "ignore", label: "", reason: "Текста почти нет, в базу знаний не добавляю." };
+  }
+  if (text.startsWith("/")) {
+    return { action: "ignore", label: "", reason: "Это команда, в базу знаний не добавляю." };
+  }
+  if (isLikelyQuestionText(raw)) {
+    return { action: "ignore", label: "", reason: "Это вопрос, в базу знаний не добавляю." };
+  }
+  if (isLikelyNoiseText(raw)) {
+    return { action: "ignore", label: "", reason: "Похоже на обсуждение или короткую реплику, в базу знаний не добавляю." };
+  }
+
+  const metricMarkers = ["метрик", "kpi", "cir", "npl", "csi", "rr ", "чкд", "план", "факт", "значени", "диапазон"];
+  const reactionMarkers = ["если", "то ", "считать", "риск", "банкрот", "долг", "просроч", "экспозици", "провер", "передать", "рм", "км", "gr", "лпр"];
+  const methodologyMarkers = ["методолог", "регламент", "процесс", "правил", "критер", "рекоменд", "алгоритм", "порядок", "учитывать", "не учитывать", "использовать", "сигнал", "инсайт"];
+
+  const hasMetric = metricMarkers.some((marker) => text.includes(marker));
+  const hasReaction = reactionMarkers.some((marker) => text.includes(marker));
+  const hasMethodology = methodologyMarkers.some((marker) => text.includes(marker));
+
+  if (!hasMetric && !hasReaction && !hasMethodology) {
+    return { action: "ignore", label: "", reason: "Не похоже на методологию или правило, в базу знаний не добавляю." };
+  }
+  if (hasReaction && (text.includes("если") || text.includes("риск") || text.includes("провер"))) {
+    return { action: "save", sourceType: "text", label: "правило реакции" };
+  }
+  if (hasMetric) {
+    return { action: "save", sourceType: "context", label: "контекст метрик" };
+  }
+  if (text.includes("учитывать") || text.includes("не учитывать") || text.includes("использовать")) {
+    return { action: "save", sourceType: "context", label: "инструкцию для агента" };
+  }
+  return { action: "save", sourceType: "text", label: "методологию" };
+}
+
+function formatKnowledgeAck(kind, text, savedFiles = 0, fileErrors = [], duplicateFiles = 0, updatedFiles = 0, contextNotes = 0, skippedText = false, savedTextLabel = "", skippedReason = "") {
   const prefix = kind === "metrics" ? "Метрики принял." : "Методологию принял.";
   const shortText = truncateText(text, 96);
   const parts = [prefix];
   if (savedFiles > 0) parts.push(`Файлов прочитал: ${savedFiles}.`);
   if (duplicateFiles > 0) parts.push(`Дублей пропустил: ${duplicateFiles}.`);
   if (updatedFiles > 0) parts.push(`Новых версий: ${updatedFiles}.`);
-  if (shortText) parts.push(shortText);
+  if (savedTextLabel) parts.push(`Сохранил как ${savedTextLabel}.`);
+  if (contextNotes > 0) {
+    const suffix = kind === "metrics" ? " Как отдельную метрику не добавляю." : "";
+    parts.push(`Контекстных заметок: ${contextNotes}.${suffix}`);
+  }
+  if (shortText && kind !== "metrics") parts.push(shortText);
+  if (skippedText && kind === "metrics") parts.push("Текст как метрику не сохраняю. Для загрузки метрик пришли файл.");
+  if (skippedText && kind !== "metrics") parts.push(skippedReason || "Текст в базу знаний не добавляю.");
   if (fileErrors.length) parts.push(`Не прочитал файлов: ${fileErrors.length}.`);
   if (parts.length === 1) parts.push("Сообщение сохранил, но текста/файла в событии почти нет.");
   return parts.join("\n");
@@ -939,9 +1069,65 @@ function saveKnowledgePayload({ event, ctx, pluginConfig, kind }) {
   let savedFiles = 0;
   let duplicateFiles = 0;
   let updatedFiles = 0;
+  let contextNotes = 0;
+  let skippedText = false;
+  let savedTextLabel = "";
+  let skippedReason = "";
   let combinedText = baseText;
+  const methodologyDecision = kind === "methodology" ? classifyMethodologyText(baseText) : null;
 
-  if (baseText || !mediaEntries.length) {
+  if (kind === "metrics" && baseText && mediaEntries.length && isLikelyMetricsContextNote(baseText)) {
+    contextNotes += 1;
+  } else if (kind === "metrics" && baseText && !mediaEntries.length && isLikelyMetricsContextNote(baseText)) {
+    saveKnowledgeDocument({
+      dbPath: resolveDbPath(pluginConfig),
+      kind,
+      threadId,
+      conversationId,
+      senderId,
+      username,
+      sourceType: "context",
+      fileName: "Контекст к метрикам",
+      contentText: baseText,
+      raw: { event, ctx, note: "metrics_context_only" },
+      sourceKey: `metrics:context:${sha256(baseText).slice(0, 16)}`,
+      contentHash: sha256(baseText),
+    });
+    contextNotes += 1;
+  } else if (kind === "metrics" && (baseText || !mediaEntries.length)) {
+    skippedText = true;
+  } else if (kind === "methodology" && !baseText && !mediaEntries.length) {
+    skippedText = true;
+    skippedReason = "Текста или файла нет, в базу знаний не добавляю.";
+  } else if (kind === "methodology" && baseText && mediaEntries.length) {
+    if (methodologyDecision?.action === "save") {
+      contextNotes += 1;
+    } else {
+      skippedText = true;
+      skippedReason = methodologyDecision?.reason || "Подпись к файлу не похожа на методологию, отдельно не сохраняю.";
+    }
+  } else if (kind === "methodology" && baseText) {
+    if (methodologyDecision?.action === "save") {
+      savedTextLabel = methodologyDecision.label || "методологию";
+      saveKnowledgeDocument({
+        dbPath: resolveDbPath(pluginConfig),
+        kind,
+        threadId,
+        conversationId,
+        senderId,
+        username,
+        sourceType: methodologyDecision.sourceType || "text",
+        fileName: savedTextLabel,
+        contentText: baseText,
+        raw: { event, ctx, classifier: methodologyDecision },
+        sourceKey: `methodology:${methodologyDecision.sourceType || "text"}:${sha256(baseText).slice(0, 16)}`,
+        contentHash: sha256(baseText),
+      });
+    } else {
+      skippedText = true;
+      skippedReason = methodologyDecision?.reason || "Текст в базу знаний не добавляю.";
+    }
+  } else if (baseText || !mediaEntries.length) {
     saveKnowledgeDocument({
       dbPath: resolveDbPath(pluginConfig),
       kind,
@@ -960,6 +1146,12 @@ function saveKnowledgePayload({ event, ctx, pluginConfig, kind }) {
   for (const media of mediaEntries) {
     const extracted = extractFileText(media.path);
     const fileName = media.path ? basename(media.path) : "telegram-file";
+    const contentText = (
+      (kind === "metrics" && baseText && isLikelyMetricsContextNote(baseText)) ||
+      (kind === "methodology" && baseText && methodologyDecision?.action === "save")
+    )
+      ? ["Контекст сообщения отправителя:", baseText, "", extracted.text].join("\n")
+      : extracted.text;
     const saveResult = saveKnowledgeDocument({
       dbPath: resolveDbPath(pluginConfig),
       kind,
@@ -970,7 +1162,7 @@ function saveKnowledgePayload({ event, ctx, pluginConfig, kind }) {
       sourceType: "file",
       fileName,
       mimeType: media.mimeType,
-      contentText: extracted.text,
+      contentText,
       raw: { media, error: extracted.error, event, ctx },
       sourceKey: normalizeSourceKey(fileName, "file", kind),
       contentHash: fileSha256(media.path) || sha256(extracted.text || fileName),
@@ -985,7 +1177,7 @@ function saveKnowledgePayload({ event, ctx, pluginConfig, kind }) {
     }
   }
 
-  return { text: combinedText, savedFiles, duplicateFiles, updatedFiles, fileErrors };
+  return { text: combinedText, savedFiles, duplicateFiles, updatedFiles, contextNotes, skippedText, savedTextLabel, skippedReason, fileErrors };
 }
 
 export async function handleKnowledgeMessage(event, ctx, pluginConfig = {}) {
@@ -999,7 +1191,7 @@ export async function handleKnowledgeMessage(event, ctx, pluginConfig = {}) {
 
   try {
     const saved = saveKnowledgePayload({ event, ctx, pluginConfig, kind });
-    const ackText = formatKnowledgeAck(kind, saved.text, saved.savedFiles, saved.fileErrors, saved.duplicateFiles, saved.updatedFiles);
+    const ackText = formatKnowledgeAck(kind, saved.text, saved.savedFiles, saved.fileErrors, saved.duplicateFiles, saved.updatedFiles, saved.contextNotes, saved.skippedText, saved.savedTextLabel, saved.skippedReason);
     await sendKnowledgeAckMessage(event, ctx, pluginConfig, ackText);
     return {
       handled: true,
@@ -1027,7 +1219,7 @@ export async function handleKnowledgeInboundClaim(event, ctx, pluginConfig = {})
 
   try {
     const saved = saveKnowledgePayload({ event, ctx, pluginConfig, kind });
-    const ackText = formatKnowledgeAck(kind, saved.text, saved.savedFiles, saved.fileErrors, saved.duplicateFiles, saved.updatedFiles);
+    const ackText = formatKnowledgeAck(kind, saved.text, saved.savedFiles, saved.fileErrors, saved.duplicateFiles, saved.updatedFiles, saved.contextNotes, saved.skippedText, saved.savedTextLabel, saved.skippedReason);
     await sendKnowledgeAckMessage(event, ctx, pluginConfig, ackText);
     return {
       handled: true,

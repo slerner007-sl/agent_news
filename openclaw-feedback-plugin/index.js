@@ -37,6 +37,9 @@ export default definePluginEntry({
         const blockedMenu = await handleBlockedMenuCommand(event, ctx, pluginConfig);
         if (blockedMenu?.handled) return blockedMenu;
 
+        const metricsInfoResult = await handleMetricsInfoRequest(event, ctx, pluginConfig);
+        if (metricsInfoResult?.handled) return metricsInfoResult;
+
         return handleKnowledgeInboundClaim(event, ctx, pluginConfig);
       },
       { priority: 300, timeoutMs: 30_000 },
