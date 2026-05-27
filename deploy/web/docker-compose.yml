@@ -1,0 +1,45 @@
+# Agent News dashboard (web API + SPA).
+#
+# Mount the existing SQLite database read-only so the dashboard shows
+# whatever the cron pipeline produces. Run from the repository root:
+#
+#   docker compose -f deploy/web/docker-compose.yml --env-file deploy/web/.env up -d --build
+#
+# The web API listens on 127.0.0.1:8765 by default; the SPA container
+# listens on 127.0.0.1:8080. Both are intended to live behind the host
+# nginx that already serves OpenClaw — see docs/operations/web-deployment.md.
+
+services:
+  agent-news-web-api:
+    build:
+      context: ../../
+      dockerfile: deploy/web/Dockerfile.backend
+    image: agent-news-web-api:latest
+    container_name: agent-news-web-api
+    restart: unless-stopped
+    environment:
+      AGENT_NEWS_WEB_HOST: "0.0.0.0"
+      AGENT_NEWS_WEB_PORT: "8765"
+      AGENT_NEWS_WEB_USER: "${AGENT_NEWS_WEB_USER:-}"
+      AGENT_NEWS_WEB_PASSWORD: "${AGENT_NEWS_WEB_PASSWORD:-}"
+      AGENT_NEWS_WEB_CORS: "${AGENT_NEWS_WEB_CORS:-http://localhost:5173,http://127.0.0.1:5173}"
+    volumes:
+      # Read-only mount of the production SQLite file. Override with
+      # AGENT_NEWS_DB_HOST_PATH in the .env file when the DB lives in
+      # a non-default place on the host.
+      - "${AGENT_NEWS_DB_HOST_PATH:-../../data}:/app/data:ro"
+    ports:
+      # Bind to loopback only by default — the host nginx fronts it.
+      - "127.0.0.1:${AGENT_NEWS_WEB_PORT_HOST:-8765}:8765"
+
+  agent-news-web-ui:
+    build:
+      context: ../../
+      dockerfile: deploy/web/Dockerfile.frontend
+    image: agent-news-web-ui:latest
+    container_name: agent-news-web-ui
+    restart: unless-stopped
+    depends_on:
+      - agent-news-web-api
+    ports:
+      - "127.0.0.1:${AGENT_NEWS_WEB_UI_PORT:-8080}:80"
