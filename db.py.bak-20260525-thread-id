@@ -1,0 +1,146 @@
+"""
+db.py — инициализация БД и все операции с данными
+"""
+
+import sqlite3
+import json
+from pathlib import Path
+
+DB_PATH = Path("data/news_bot.db")
+
+
+def get_conn():
+    DB_PATH.parent.mkdir(exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    with get_conn() as conn:
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS gosb_config (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            chat_id         TEXT NOT NULL,
+            region          TEXT NOT NULL,
+            keywords        TEXT NOT NULL,
+            system_prompt   TEXT NOT NULL,
+            active          INTEGER DEFAULT 1,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS raw_news (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            url             TEXT UNIQUE NOT NULL,
+            title           TEXT NOT NULL,
+            body            TEXT,
+            source          TEXT,
+            published_at    TEXT,
+            collected_at    TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS sent_news (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            gosb_id         INTEGER NOT NULL REFERENCES gosb_config(id),
+            news_id         INTEGER NOT NULL REFERENCES raw_news(id),
+            summary         TEXT,
+            sent_at         TEXT DEFAULT (datetime('now')),
+            UNIQUE(gosb_id, news_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_raw_news_collected ON raw_news(collected_at);
+        CREATE INDEX IF NOT EXISTS idx_sent_news_gosb    ON sent_news(gosb_id);
+        """)
+    print("✅ БД инициализирована")
+
+
+def get_active_gosbs():
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM gosb_config WHERE active = 1"
+        ).fetchall()
+
+
+def get_unsent_news(gosb_id: int, since_hours: int = 24):
+    with get_conn() as conn:
+        return conn.execute("""
+            SELECT r.*
+            FROM raw_news r
+            WHERE r.collected_at >= datetime('now', ? || ' hours')
+              AND r.id NOT IN (
+                  SELECT news_id FROM sent_news WHERE gosb_id = ?
+              )
+            ORDER BY r.published_at DESC
+        """, (f"-{since_hours}", gosb_id)).fetchall()
+
+
+def save_raw_news(items: list) -> int:
+    saved = 0
+    with get_conn() as conn:
+        for item in items:
+            try:
+                conn.execute("""
+                    INSERT INTO raw_news (url, title, body, source, published_at)
+                    VALUES (:url, :title, :body, :source, :published_at)
+                """, item)
+                saved += 1
+            except sqlite3.IntegrityError:
+                pass
+    return saved
+
+
+def mark_as_sent(gosb_id: int, news_id: int, summary: str):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO sent_news (gosb_id, news_id, summary)
+            VALUES (?, ?, ?)
+        """, (gosb_id, news_id, summary))
+
+
+def add_gosb(name, chat_id, region, keywords, system_prompt):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO gosb_config (name, chat_id, region, keywords, system_prompt)
+            VALUES (?, ?, ?, ?, ?)
+        """, (name, chat_id, region, json.dumps(keywords, ensure_ascii=False), system_prompt))
+    print(f"✅ ГОСБ '{name}' добавлен")
+
+
+SAMARA_PROMPT = """Ты — аналитик новостей для Самарского отделения Сбербанка.
+Тебе дан список новостей. Отбери только те, которые РЕЛЕВАНТНЫ для регионального банка:
+- события банковского сектора в Самарской области
+- изменения ЦБ РФ (ставки, регулирование)
+- крупный бизнес, застройщики, промышленность Самары
+- мошенничество, киберугрозы, финансовые преступления в регионе
+
+НЕ включай: спорт, развлечения, погоду, федеральную политику без банковской связи.
+
+Ответь ТОЛЬКО JSON (без markdown):
+{"relevant": [{"index": 0, "summary": "Контекст и значимость для банка, не повторяй заголовок"}]}"""
+
+SAMARA_KEYWORDS = [
+    "сбербанк", "банк", "кредит", "ипотека", "вклад",
+    "самара", "самарская", "тольятти", "цб рф", "ключевая ставка",
+    "мошенник", "финанс", "застройщик"
+]
+
+
+if __name__ == "__main__":
+    init_db()
+
+    with get_conn() as conn:
+        exists = conn.execute(
+            "SELECT id FROM gosb_config WHERE name = 'Самарский ГОСБ'"
+        ).fetchone()
+
+    if not exists:
+        add_gosb(
+            name="Самарский ГОСБ",
+            chat_id="-1003932865226",
+            region="Самара, Самарская область, Тольятти",
+            keywords=SAMARA_KEYWORDS,
+            system_prompt=SAMARA_PROMPT,
+        )
+    else:
+        print("ℹ️  Самарский ГОСБ уже есть в БД")
