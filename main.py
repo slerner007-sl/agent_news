@@ -12,6 +12,10 @@ from llm_filter import run_filter
 from sender import send_digest
 
 
+def insights_enabled() -> bool:
+    return os.getenv("INSIGHTS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def run_configured_filter(run_id: str | None = None) -> bool:
     """Run legacy or V2 filter. Returns True when Telegram sending is safe."""
     version = os.getenv("NEWS_FILTER_VERSION", "legacy").strip().lower()
@@ -49,6 +53,15 @@ def main():
     if should_send:
         print("\n📤 ШАГ 3: Отправка в Telegram\n")
         send_digest(run_id=run_id)
+
+        if insights_enabled():
+            print("\n🧭 ШАГ 4: Инсайты к действиям\n")
+            from insights import generate_insights, send_insights
+
+            generate_insights(run_id=run_id)
+            send_insights(run_id=run_id)
+        else:
+            print("\n🧭 ШАГ 4: инсайты выключены (INSIGHTS_ENABLED=0)\n")
     else:
         print("\n🧪 ШАГ 3: shadow/dry-run режим — отправка в Telegram пропущена\n")
 

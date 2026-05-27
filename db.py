@@ -137,6 +137,52 @@ def init_db():
             ON news_metric_links(news_id);
         CREATE INDEX IF NOT EXISTS idx_news_metric_links_gosb
             ON news_metric_links(gosb_id, mode);
+
+        CREATE TABLE IF NOT EXISTS insights (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            gosb_id         INTEGER NOT NULL REFERENCES gosb_config(id),
+            run_id          TEXT,
+            title           TEXT NOT NULL,
+            insight_type    TEXT NOT NULL,
+            priority        TEXT NOT NULL,
+            confidence      REAL NOT NULL DEFAULT 0,
+            why_it_matters  TEXT,
+            suggested_action TEXT,
+            owner_hint      TEXT,
+            evidence        TEXT,
+            source_json     TEXT,
+            llm_raw_json    TEXT,
+            status          TEXT NOT NULL DEFAULT 'proposed',
+            created_at      TEXT DEFAULT (datetime('now')),
+            UNIQUE(gosb_id, run_id, title, suggested_action)
+        );
+
+        CREATE TABLE IF NOT EXISTS insight_news_links (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            insight_id      INTEGER NOT NULL REFERENCES insights(id),
+            news_id         INTEGER NOT NULL REFERENCES raw_news(id),
+            created_at      TEXT DEFAULT (datetime('now')),
+            UNIQUE(insight_id, news_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS insight_metric_links (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            insight_id      INTEGER NOT NULL REFERENCES insights(id),
+            metric_key      TEXT NOT NULL,
+            metric_name     TEXT,
+            impact          TEXT,
+            confidence      REAL,
+            reason          TEXT,
+            created_at      TEXT DEFAULT (datetime('now')),
+            UNIQUE(insight_id, metric_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_insights_run
+            ON insights(run_id);
+        CREATE INDEX IF NOT EXISTS idx_insights_gosb_status
+            ON insights(gosb_id, status);
+        CREATE INDEX IF NOT EXISTS idx_insight_news_links_news
+            ON insight_news_links(news_id);
         """)
 
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(gosb_config)")}
@@ -371,6 +417,94 @@ def save_news_metric_links(
                 float(link.get("confidence") or 0),
                 str(link.get("reason") or "").strip()[:500],
             ))
+
+
+def save_insight(
+    gosb_id: int,
+    run_id: str | None,
+    title: str,
+    insight_type: str,
+    priority: str,
+    confidence: float,
+    why_it_matters: str,
+    suggested_action: str,
+    owner_hint: str = "",
+    evidence: str = "",
+    news_ids: list[int] | None = None,
+    metric_links: list | None = None,
+    source: dict | list | str | None = None,
+    llm_raw_json: dict | list | str | None = None,
+) -> int | None:
+    if isinstance(source, (dict, list)):
+        source = json.dumps(source, ensure_ascii=False)
+    if isinstance(llm_raw_json, (dict, list)):
+        llm_raw_json = json.dumps(llm_raw_json, ensure_ascii=False)
+
+    title = str(title or "").strip()
+    insight_type = str(insight_type or "").strip()
+    priority = str(priority or "").strip()
+    why_it_matters = str(why_it_matters or "").strip()
+    suggested_action = str(suggested_action or "").strip()
+    owner_hint = str(owner_hint or "").strip()
+    evidence = str(evidence or "").strip()
+
+    with get_conn() as conn:
+        cur = conn.execute("""
+            INSERT OR IGNORE INTO insights (
+                gosb_id, run_id, title, insight_type, priority, confidence,
+                why_it_matters, suggested_action, owner_hint, evidence,
+                source_json, llm_raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            gosb_id,
+            run_id,
+            title[:220],
+            insight_type[:60],
+            priority[:20],
+            float(confidence or 0),
+            why_it_matters[:900],
+            suggested_action[:900],
+            owner_hint[:160],
+            evidence[:700],
+            source,
+            llm_raw_json,
+        ))
+        insight_id = cur.lastrowid
+        if not insight_id:
+            row = conn.execute("""
+                SELECT id FROM insights
+                WHERE gosb_id = ? AND COALESCE(run_id, '') = COALESCE(?, '')
+                  AND title = ? AND suggested_action = ?
+            """, (gosb_id, run_id, title[:220], suggested_action[:900])).fetchone()
+            insight_id = row["id"] if row else None
+        if not insight_id:
+            return None
+
+        for news_id in news_ids or []:
+            conn.execute(
+                "INSERT OR IGNORE INTO insight_news_links (insight_id, news_id) VALUES (?, ?)",
+                (insight_id, int(news_id)),
+            )
+
+        for link in metric_links or []:
+            metric_key = str(link.get("metric_key") or link.get("metric_name") or "").strip()
+            if not metric_key:
+                continue
+            conn.execute("""
+                INSERT OR IGNORE INTO insight_metric_links (
+                    insight_id, metric_key, metric_name, impact, confidence, reason
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                insight_id,
+                metric_key[:160],
+                str(link.get("metric_name") or "").strip()[:220] or None,
+                str(link.get("impact") or "context").strip()[:40],
+                float(link.get("confidence") or 0),
+                str(link.get("reason") or "").strip()[:500],
+            ))
+        return insight_id
 
 
 def add_gosb(name, chat_id, region, keywords, system_prompt, thread_id=None):
