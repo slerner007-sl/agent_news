@@ -118,5 +118,13 @@ assert messages[0][2] == "99"
 assert "Инсайты к действиям" in messages[0][1]
 assert "Проверить потенциал" in messages[1][1]
 
+messages.clear()
+insights.INSIGHTS_THREAD_ID = ""
+insights.INSIGHTS_THREAD_IDS = "Самарский ГОСБ=136"
+assert insights.send_insights("run-1") == 1
+assert len(messages) == 2
+assert messages[0][2] == "136"
+assert "Самарский ГОСБ" in messages[0][1]
+
 Path(path).unlink(missing_ok=True)
 print("insights ok")

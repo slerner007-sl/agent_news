@@ -39,12 +39,48 @@ MIN_CONFIDENCE = float(os.getenv("INSIGHT_MIN_CONFIDENCE", "0.75"))
 BATCH_SIZE = int(os.getenv("INSIGHT_BATCH_SIZE", "12"))
 MAX_ITEMS = int(os.getenv("INSIGHT_MAX_ITEMS", "0"))
 INSIGHTS_THREAD_ID = os.getenv("INSIGHTS_THREAD_ID", "").strip()
+INSIGHTS_THREAD_IDS = os.getenv("INSIGHTS_THREAD_IDS", "").strip()
 INSIGHTS_CHAT_ID = os.getenv("INSIGHTS_CHAT_ID", "").strip()
 
 
 def _chunked(items: list[dict], size: int) -> Iterable[list[dict]]:
     for start in range(0, len(items), size):
         yield items[start:start + size]
+
+
+def _parse_thread_ids(value: str) -> dict[str, str]:
+    value = (value or "").strip()
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return {str(k).strip(): str(v).strip() for k, v in parsed.items() if str(k).strip() and str(v).strip()}
+
+    result: dict[str, str] = {}
+    for part in re.split(r"[;\n]+", value):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            key, thread_id = part.split("=", 1)
+        elif ":" in part:
+            key, thread_id = part.split(":", 1)
+        else:
+            continue
+        key = key.strip()
+        thread_id = thread_id.strip()
+        if key and thread_id:
+            result[key] = thread_id
+    return result
+
+
+def _thread_id_for_insight(insight: dict) -> str:
+    mapping = _parse_thread_ids(INSIGHTS_THREAD_IDS)
+    gosb_name = str(insight.get("gosb_name") or "").strip()
+    return mapping.get(gosb_name) or INSIGHTS_THREAD_ID
 
 
 def _clean_text(value, limit: int = 1000) -> str:
@@ -418,25 +454,42 @@ def _send_message(chat_id, text, thread_id=None, reply_markup=None):
 
 
 def send_insights(run_id: str) -> int:
-    thread_id = INSIGHTS_THREAD_ID
-    if not thread_id:
-        print("🧭 INSIGHTS_THREAD_ID не задан — отправка инсайтов пропущена")
-        return 0
-
     insights = get_insights_for_run(run_id)
     if not insights:
         print("🧭 Нет инсайтов для отправки")
         return 0
 
-    chat_id = INSIGHTS_CHAT_ID or insights[0]["chat_id"]
-    sent = 0
-    if _send_message(chat_id, f"🧭 <b>Инсайты к действиям</b>\\n<i>{len(insights)} рекомендаций</i>", thread_id):
-        sent += 1
+    buckets: dict[tuple[str, str], list[dict]] = {}
+    skipped = 0
     for insight in insights:
-        if _send_message(chat_id, format_insight_message(insight), thread_id):
-            sent += 1
-    print(f"🧭 Инсайты отправлены: {max(0, sent - 1)}/{len(insights)}")
-    return max(0, sent - 1)
+        thread_id = _thread_id_for_insight(insight)
+        if not thread_id:
+            skipped += 1
+            continue
+        chat_id = INSIGHTS_CHAT_ID or insight["chat_id"]
+        buckets.setdefault((chat_id, thread_id), []).append(insight)
+
+    if not buckets:
+        print("🧭 INSIGHTS_THREAD_ID/INSIGHTS_THREAD_IDS не заданы — отправка инсайтов пропущена")
+        return 0
+
+    sent = 0
+    for (chat_id, thread_id), bucket in buckets.items():
+        gosb_names = sorted({str(item.get("gosb_name") or "") for item in bucket})
+        title = ", ".join(name for name in gosb_names if name) or "ГОСБ"
+        _send_message(
+            chat_id,
+            f"🧭 <b>Инсайты к действиям · {escape(title)}</b>\\n<i>{len(bucket)} рекомендаций</i>",
+            thread_id,
+        )
+        for insight in bucket:
+            if _send_message(chat_id, format_insight_message(insight), thread_id):
+                sent += 1
+
+    if skipped:
+        print(f"🧭 Инсайтов без настроенного топика: {skipped}")
+    print(f"🧭 Инсайты отправлены: {sent}/{len(insights)}")
+    return sent
 
 
 def main() -> None:
