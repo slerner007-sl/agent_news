@@ -1,0 +1,94 @@
+// Example OpenClaw agents block for the GOSB bot.
+// This file is intentionally a JSONC template, not a live config:
+// - no gateway tokens;
+// - no Telegram bot token;
+// - only the scalable agent layout.
+//
+// Live config on VPS:
+// /home/user1/.openclaw/openclaw.json
+//
+// Product rule:
+// - "agents" are LLM roles that reason and make semantic decisions;
+// - deterministic code paths such as parsing RSS, sending Telegram messages,
+//   saving feedback buttons and ingesting files are services/modules, not agents.
+{
+  "agents": {
+    "defaults": {
+      // Default workspace for the technical main OpenClaw runtime.
+      // Individual agents below have their own isolated workspaces.
+      "workspace": "/home/user1/.openclaw/workspace",
+
+      // Keep the currently working provider/model. Change this only after
+      // checking OpenClaw auth and provider aliases on the VPS.
+      "model": {
+        "primary": "openai/gpt-5.5",
+        "fallbacks": []
+      },
+
+      // Shared high-reasoning defaults for LLM agents.
+      "contextTokens": 1000000,
+      "thinkingDefault": "high",
+      "subagents": {
+        "model": "openai/gpt-5.5",
+        "thinking": "high"
+      },
+
+      // Current deployment runs on a trusted VPS user. If this bot becomes
+      // multi-tenant or externally exposed, revisit sandbox and privileges.
+      "elevatedDefault": "full",
+      "sandbox": {
+        "mode": "off"
+      },
+
+      // Lets OpenClaw load enough project/instructions context at startup.
+      "bootstrapMaxChars": 32000,
+
+      // Keep one active run to avoid Telegram/chat race conditions.
+      "maxConcurrent": 1
+    },
+
+    "list": [
+      {
+        // Technical entrypoint for Telegram/OpenClaw.
+        // This is not a product LLM agent; it routes general chat behavior.
+        "id": "main",
+        "default": true,
+        "name": "main",
+        "workspace": "/home/user1/.openclaw/workspace-main",
+        "agentDir": "/home/user1/.openclaw/agents/main/agent",
+        "thinkingDefault": "high",
+        "subagents": {
+          "allowAgents": []
+        },
+        "systemPromptOverride": "Ты главный Telegram-агент ГОСБ-бота. Принимаешь сообщения из рабочих топиков, передаешь детерминированные сценарии плагину и отвечаешь на общие вопросы."
+      },
+      {
+        // LLM agent #1.
+        // Makes semantic relevance decisions for regional banking news.
+        "id": "relevance_filter_v2",
+        "name": "relevance_filter_v2",
+        "workspace": "/home/user1/.openclaw/workspace-relevance-filter-v2",
+        "agentDir": "/home/user1/.openclaw/agents/relevance_filter_v2/agent",
+        "thinkingDefault": "high",
+        "subagents": {
+          "allowAgents": []
+        },
+        "systemPromptOverride": "Ты LLM-агент отбора релевантности ГОСБ. Отбираешь релевантные новости для каждого ГОСБа через LLM V2 с учетом региона, источников, холдингов, базы знаний и банковских метрик. Рабочая реализация: /home/user1/gosb_bot/llm_filter_v2.py."
+      },
+      {
+        // LLM agent #2.
+        // Generates management insights and recommended actions from sent news,
+        // metrics, comments and knowledge base documents.
+        "id": "reflection_insights_agent",
+        "name": "reflection_insights_agent",
+        "workspace": "/home/user1/.openclaw/workspace-reflection-insights",
+        "agentDir": "/home/user1/.openclaw/agents/reflection_insights_agent/agent",
+        "thinkingDefault": "high",
+        "subagents": {
+          "allowAgents": []
+        },
+        "systemPromptOverride": "Ты LLM-агент управленческой рефлексии ГОСБ. Формируешь рекомендации и инсайты по отправленным новостям, метрикам, комментариям и базе знаний. Рабочая реализация: /home/user1/gosb_bot/insights.py."
+      }
+    ]
+  }
+}
