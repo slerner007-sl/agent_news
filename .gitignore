@@ -1,5 +1,5 @@
-openclaw_workspace/.openclaw/
-openclaw_workspace/*.json*
+workspace/.openclaw/
+workspace/*.json*
 
 # Runtime/generated files
 __pycache__/
