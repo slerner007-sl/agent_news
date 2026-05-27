@@ -32,6 +32,7 @@ const COMMENT_TITLE_MAX_LENGTH = 82;
 const SENDER_PY_PATH = "/home/user1/gosb_bot/sender.py";
 const SOURCES_TXT_PATH = "/home/user1/gosb_bot/config/sources.txt";
 const HOLDINGS_TXT_PATH = "/home/user1/gosb_bot/config/holdings.txt";
+const AGENTS_REGISTRY_PATH = "/home/user1/gosb_bot/config/agents.json";
 const KNOWLEDGE_FILE_READER_PATH = "/home/user1/gosb_bot/knowledge_file_reader.py";
 const OPENCLAW_INBOUND_MEDIA_DIR = "/home/user1/.openclaw/media/inbound";
 const BOT_INFO_BUTTON_TEXT = "Что я умею?";
@@ -357,6 +358,24 @@ function loadActiveGosbs(pluginConfig = {}) {
   }
 }
 
+function loadAgentRegistry(pluginConfig = {}) {
+  const agentsPath = cleanText(pluginConfig.agentsRegistryPath) || AGENTS_REGISTRY_PATH;
+  try {
+    const parsed = JSON.parse(readFileSync(agentsPath, "utf8"));
+    const agents = Array.isArray(parsed?.agents) ? parsed.agents : [];
+    return agents
+      .map((agent) => ({
+        id: cleanText(agent?.id),
+        name: cleanText(agent?.name),
+        role: cleanText(agent?.role),
+        enabled: agent?.enabled !== false,
+      }))
+      .filter((agent) => agent.enabled && agent.id && agent.name);
+  } catch {
+    return [];
+  }
+}
+
 function formatSourceLine(sources) {
   if (!sources.length) return "Источники: список пока не прочитан.";
   const rssCount = sources.filter((source) => ["rss", "smi"].includes(source.type)).length;
@@ -389,6 +408,12 @@ function formatHoldingsLine(holdings) {
   return `Клиентские холдинги: ${groups}. Всего: ${holdings.length}.`;
 }
 
+function formatAgentsLine(agents) {
+  if (!agents.length) return "Агенты: явный реестр пока не прочитан.";
+  const names = agents.map((agent) => agent.name).join(", ");
+  return `Агенты: ${agents.length} явно описаны в config/agents.json: ${names}.`;
+}
+
 function formatGosbLine(gosbs) {
   if (!gosbs.length) return "ГОСБы: активные конфиги пока не прочитаны.";
   const names = gosbs.map((gosb) => gosb.name).join(", ");
@@ -411,8 +436,10 @@ function formatBotInfoSummary(pluginConfig = {}) {
   const sources = loadSourceNames(pluginConfig);
   const holdings = loadHoldings(pluginConfig);
   const gosbs = loadActiveGosbs(pluginConfig);
+  const agents = loadAgentRegistry(pluginConfig);
   return [
     formatBotIntro(gosbs),
+    formatAgentsLine(agents),
     "",
     "Что делаю:",
     "- собираю новости из RSS и Telegram-источников;",

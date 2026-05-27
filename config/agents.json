@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "description": "Explicit registry of product agents used by the GOSB assistant. These are business agents: roles, prompts and data flows, not OpenClaw skills.",
+  "agents": [
+    {
+      "id": "news_collector",
+      "name": "Агент сбора новостей",
+      "role": "Собирает региональные новости из RSS, Telegram и других подключенных источников.",
+      "implementation": "parser.py",
+      "inputs": ["config/sources.txt", "gosb_config"],
+      "outputs": ["raw_news"],
+      "enabled": true
+    },
+    {
+      "id": "relevance_filter_v2",
+      "name": "Агент отбора релевантности",
+      "role": "Оценивает новости для каждого ГОСБа через LLM V2 с учетом региона, источников, холдингов и банковских метрик.",
+      "implementation": "llm_filter_v2.py",
+      "inputs": ["raw_news", "config/holdings.txt", "knowledge_documents"],
+      "outputs": ["filtered_news"],
+      "prompt_source": "llm_filter_v2._build_prompt",
+      "enabled": true
+    },
+    {
+      "id": "digest_sender",
+      "name": "Агент отправки дайджестов",
+      "role": "Отправляет отобранные новости в региональные Telegram-топики и прикрепляет кнопки разметки.",
+      "implementation": "sender.py",
+      "inputs": ["filtered_news", "gosb_config"],
+      "outputs": ["sent_news", "telegram_messages"],
+      "enabled": true
+    },
+    {
+      "id": "feedback_collector",
+      "name": "Агент сбора разметки",
+      "role": "Сохраняет реакции, снятие реакций и комментарии экспертов по новостям и инсайтам.",
+      "implementation": "openclaw-feedback-plugin",
+      "inputs": ["telegram_callbacks", "telegram_replies"],
+      "outputs": ["feedback", "insight_feedback"],
+      "enabled": true
+    },
+    {
+      "id": "knowledge_metrics_agent",
+      "name": "Агент метрик и базы знаний",
+      "role": "Принимает файлы и полезные методологические сообщения, отделяет вопросы и шум от знаний.",
+      "implementation": "openclaw-feedback-plugin + knowledge_file_reader.py",
+      "inputs": ["metrics_topic", "methodology_topic", "uploaded_files"],
+      "outputs": ["knowledge_documents"],
+      "enabled": true
+    },
+    {
+      "id": "reflection_insights_agent",
+      "name": "Агент управленческой рефлексии",
+      "role": "Формирует рекомендации и инсайты по отправленным новостям, метрикам, комментариям и базе знаний.",
+      "implementation": "insights.py",
+      "inputs": ["sent_news", "feedback", "knowledge_documents", "metrics"],
+      "outputs": ["insights", "telegram_insight_messages"],
+      "prompt_source": "insights._build_prompt",
+      "enabled": true
+    }
+  ]
+}

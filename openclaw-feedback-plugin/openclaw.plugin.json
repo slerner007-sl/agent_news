@@ -25,6 +25,10 @@
       "botTokenEnv": {
         "type": "string",
         "default": "GOSB_TELEGRAM_BOT_TOKEN"
+      },
+      "agentsRegistryPath": {
+        "type": "string",
+        "default": "/home/user1/gosb_bot/config/agents.json"
       }
     }
   }

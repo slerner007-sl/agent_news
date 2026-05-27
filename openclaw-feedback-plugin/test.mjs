@@ -216,12 +216,24 @@ try {
       "Калининградский ГОСБ|АКФЕН|||Удержание",
     ].join("\n") + "\n",
   );
+  const agentsRegistryPath = path.join(tempDir, "agents.json");
+  writeFileSync(
+    agentsRegistryPath,
+    JSON.stringify({
+      agents: [
+        { id: "news_collector", name: "Агент сбора новостей", role: "Собирает новости", enabled: true },
+        { id: "reflection_insights_agent", name: "Агент управленческой рефлексии", role: "Формирует инсайты", enabled: true },
+        { id: "disabled_agent", name: "Отключенный агент", enabled: false },
+      ],
+    }),
+  );
   const pluginConfig = {
     dbPath,
     pendingPath: path.join(tempDir, "plugin-pending.json"),
     commentTtlMs: 60_000,
     sourcesPath,
     holdingsPath,
+    agentsRegistryPath,
     promptBlockEnabled: false,
     botInfoDirectSendEnabled: false,
   };
@@ -233,6 +245,7 @@ try {
   );
   assert.equal(infoResult.handled, true);
   assert.match(infoResult.text, /Я интеллектуальный помощник для управляющих 2 региональных ГОСБов/);
+  assert.match(infoResult.text, /Агенты: 2 явно описаны в config\/agents\.json: Агент сбора новостей, Агент управленческой рефлексии/);
   assert.match(infoResult.text, /ГОСБы: 2 активных: Самарский ГОСБ, Калининградский ГОСБ/);
   assert.match(infoResult.text, /Регионы: Самара, Самарская область; Калининградская область/);
   assert.match(infoResult.text, /Источники по регионам: Самарская область — 2/);
