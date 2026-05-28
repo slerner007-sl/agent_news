@@ -647,39 +647,288 @@ def _research_from_markdown(markdown_text: str, report: dict) -> dict:
     })
     return fallback
 
-def _fallback_research(report: dict, reason: str = "") -> dict:
-    summary = _summary_markdown(report)
-    journal = _journal_markdown(report)
+def _as_text(value) -> str:
+    if isinstance(value, dict):
+        return str(value.get("title") or value.get("gap") or value.get("hypothesis") or value.get("observation") or value)
+    return str(value)
+
+
+def _demo_confirmed_findings(report: dict) -> list[str]:
+    findings: list[str] = []
+    scope = report["scope"]
+    if scope.get("sent_news"):
+        findings.append(
+            f"За период агент видел {scope['sent_news']} отправленных новостей и {scope['insights']} управленческих инсайтов; это уже достаточный материал для daily reflection."
+        )
+    top_categories = list((scope.get("categories") or {}).items())[:3]
+    if top_categories:
+        findings.append(
+            "Главные тематические контуры периода: "
+            + ", ".join(f"{name}={count}" for name, count in top_categories)
+            + "."
+        )
+    if report.get("meta_insights"):
+        findings.extend(_as_text(item) for item in report["meta_insights"][:4])
+    if scope.get("metric_links", 0) <= max(1, scope.get("insights", 0) // 10):
+        findings.append("Связь инсайтов с метриками пока слабая: агент явно поднимает это как ограничение качества, а не прячет проблему.")
+    if scope.get("insight_feedback", 0) == 0:
+        findings.append("Фидбек по самим инсайтам пока отсутствует, поэтому калибровка рекомендаций идёт в основном через реакции на новости.")
+    return findings[:8]
+
+
+def _demo_causal_chains(report: dict) -> list[dict]:
+    chains = []
+    if report.get("meta_insights"):
+        top = report["meta_insights"][0]
+        chains.append({
+            "id": "CAUSAL-01",
+            "title": "Повторяемая тема превращается в управленческий сигнал",
+            "chain": "серия похожих новостей -> кластер темы -> проверка клиента/метрики/ответственного",
+            "for_role": "руководитель ГОСБ",
+            "status": "open",
+            "evidence": _as_text(top),
+            "behavior_change": "Не реагировать на каждую новость отдельно, а смотреть на повторяемость темы за период.",
+        })
+    if report.get("feedback_adjustments"):
+        adj = report["feedback_adjustments"][0]
+        chains.append({
+            "id": "CAUSAL-02",
+            "title": "Негативный фидбек превращается в настройку фильтра",
+            "chain": "реакции boring/comment -> шумная категория -> повышение требований к evidence",
+            "for_role": "владелец фильтра новостей",
+            "status": "accepted",
+            "evidence": _as_text(adj.get("observation") if isinstance(adj, dict) else adj),
+            "behavior_change": "Категории с высоким boring-ratio должны получать меньший приоритет без конкретной привязки к клиенту, метрике или риску.",
+        })
+    chains.append({
+        "id": "CAUSAL-03",
+        "title": "Нет фидбека по инсайтам — нет уверенной калибровки действий",
+        "chain": "инсайт отправлен -> нет реакции на инсайт -> действие не подтверждено пользователем",
+        "for_role": "куратор пилота",
+        "status": "open",
+        "evidence": f"Insight feedback rows: {report['scope'].get('insight_feedback', 0)}",
+        "behavior_change": "На демо показать кнопки инсайтов и попросить менеджеров размечать именно рекомендации, а не только новости.",
+    })
+    return chains
+
+
+def _demo_advisories(report: dict) -> list[dict]:
+    advisories = []
+    for idx, item in enumerate(report.get("feedback_adjustments", [])[:3], start=1):
+        advisories.append({
+            "id": f"ADV-{idx:02d}",
+            "title": item.get("target", "Корректировка по фидбеку") if isinstance(item, dict) else "Корректировка по фидбеку",
+            "action": item.get("recommendation", _as_text(item)) if isinstance(item, dict) else _as_text(item),
+            "for_role": "владелец фильтра / руководитель пилота",
+            "source": "feedback",
+            "confidence": item.get("confidence", 0.7) if isinstance(item, dict) else 0.7,
+        })
+    advisories.append({
+        "id": f"ADV-{len(advisories)+1:02d}",
+        "title": "Сделать daily reflection регулярным экраном демо",
+        "action": "Показывать не только список новостей, а блок: что повторилось, что менеджеры сочли шумом, какие данные нужны для следующего шага.",
+        "for_role": "демо / владелец продукта",
+        "source": "trend",
+        "confidence": 0.82,
+    })
+    return advisories
+
+
+def _demo_data_gaps(report: dict) -> list[dict]:
+    gaps = [
+        {
+            "id": "GAP-01",
+            "gap": "Мало или нет реакций на сами инсайты",
+            "why_it_matters": "Без этого агент понимает шумность новостей, но хуже понимает полезность управленческих рекомендаций.",
+            "what_to_add": "Просить участников демо нажимать useful/boring/comment именно под инсайтами.",
+        },
+        {
+            "id": "GAP-02",
+            "gap": "Недостаточная привязка инсайтов к бизнес-метрикам",
+            "why_it_matters": "Метрики превращают новость из информационного повода в проверяемую управленческую гипотезу.",
+            "what_to_add": "Дозагрузить методологию и таблицу метрик по ГОСБ, добавить accepted examples связей новость→метрика.",
+        },
+    ]
+    for idx, gap in enumerate(report.get("data_gaps", [])[:4], start=3):
+        gaps.append({
+            "id": f"GAP-{idx:02d}",
+            "gap": _as_text(gap),
+            "why_it_matters": "Это ограничивает уверенность research-выводов.",
+            "what_to_add": "Закрыть источник данных или добавить явное правило интерпретации.",
+        })
+    return gaps
+
+
+def _demo_rejected_hypotheses(report: dict) -> list[dict]:
+    return [
+        {
+            "id": "H-R01",
+            "hypothesis": "Количество новостей само по себе означает качество отбора",
+            "reason": "Rejected: без фидбека, метрик и связки с действием большой объём может быть шумом.",
+        },
+        {
+            "id": "H-R02",
+            "hypothesis": "Любая повторяющаяся региональная тема автоматически полезна ГОСБ",
+            "reason": "Open/rejected until there is client, metric, risk or LPR link.",
+        },
+        {
+            "id": "H-R03",
+            "hypothesis": "Категории banking/business всегда надо поднимать выше",
+            "reason": "Rejected for current period: feedback shows boring pressure on part of these categories.",
+        },
+    ]
+
+
+def _demo_task_candidates(gaps: list[dict], advisories: list[dict]) -> list[dict]:
+    tasks = []
+    for gap in gaps[:3]:
+        tasks.append({
+            "title": gap["gap"],
+            "priority": "high" if gap["id"] in {"GAP-01", "GAP-02"} else "medium",
+            "effect": gap["what_to_add"],
+            "confidence": "medium",
+        })
+    for adv in advisories[:2]:
+        tasks.append({
+            "title": adv["title"],
+            "priority": "medium",
+            "effect": adv["action"],
+            "confidence": "medium",
+        })
+    return tasks
+
+
+def _demo_summary_md(report: dict, research: dict, reason: str = "") -> str:
+    period = report["period"]
+    scope = report["scope"]
+    lines = [
+        f"# Глубокий отчёт AI Visor за период {period['start']} — {period['end']}",
+        "",
+        research["executive_summary"],
+        "",
+        "## Было → стало",
+        f"Было: обычный дайджест показывал отдельные новости. Стало: reflection-agent собирает {scope['sent_news']} новостей, {scope['insights']} инсайтов, {scope['news_feedback'] + scope['insight_feedback']} реакций и превращает их в исследовательский отчёт с выводами, советами, пробелами данных и rejected hypotheses.",
+        "",
+        "## Подтверждённые выводы",
+    ]
+    for item in research["confirmed_findings"]:
+        lines.append(f"- {item}")
+    lines.extend(["", "## Причинно-следственные цепочки"])
+    for chain in research["causal_chains"]:
+        lines.append(f"- {chain['title']} ({chain['for_role']}): {chain['behavior_change']}")
+    lines.extend(["", "## Практические советы"])
+    for adv in research["advisories"]:
+        lines.append(f"- {adv['title']} ({adv['source']}): {adv['action']}")
+    lines.extend(["", "## Внешний фон недели"])
+    lines.append("- Fresh external scan для демо не запускался: отчёт показывает внутреннюю research-логику на фактах текущего пайплайна.")
+    lines.extend(["", "## Данные"])
+    lines.append(f"- Новости: {scope['sent_news']}; инсайты: {scope['insights']}; реакции на новости: {scope['news_feedback']}; реакции на инсайты: {scope['insight_feedback']}; metric links: {scope['metric_links']}.")
+    lines.extend(["", "## Риски и ограничения"])
+    if reason and reason != "llm disabled":
+        lines.append(f"- LLM narrative fallback: {reason}. Для демо используется стабильный research-style renderer поверх evidence pack.")
+    lines.append("- Выводы не меняют production-фильтр автоматически; это advisory/research layer.")
+    lines.extend(["", "## Пробелы в данных"])
+    for gap in research["data_gaps"]:
+        lines.append(f"- {gap['gap']}: {gap['what_to_add']}")
+    lines.extend(["", "## Слабые гипотезы"])
+    for item in research["rejected_hypotheses"]:
+        lines.append(f"- {item['hypothesis']} — {item['reason']}")
+    lines.extend(["", "## Кандидаты задач"])
+    for task in research["task_candidates"]:
+        lines.append(f"- {task['title']} (приоритет: {task['priority']}, эффект: {task['effect']})")
+    lines.extend(["", "## Open questions"])
+    for question in research["open_questions"]:
+        lines.append(f"- {question}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _demo_journal_md(report: dict, research: dict, reason: str = "") -> str:
+    period = report["period"]
+    lines = [
+        f"# Journal — AI Visor reflection demo ({period['start']} — {period['end']})",
+        "",
+        "Mission: показать на демо, что агент рефлексии не пересказывает новости, а исследует качество сигналов, фидбек, пробелы данных и возможные действия.",
+        "",
+        "## [1] Research plan — demo daily cycle",
+        "**Гипотеза:** За один день можно показать полный цикл: новости → инсайты → фидбек → meta-findings → advisory → gaps.",
+        "",
+        "**Метод:** Считать evidence pack из БД, построить тренды по категориям/ГОСБ, проверить фидбек и metric links, собрать sidecar bundle как у reference reporting.",
+        "",
+        f"**Наблюдение:** Новости={report['scope']['sent_news']}, инсайты={report['scope']['insights']}, news_feedback={report['scope']['news_feedback']}, insight_feedback={report['scope']['insight_feedback']}.",
+        "",
+        "**Интерпретация:** Этого достаточно для demo-pass, но не для изменения production rules без review.",
+        "",
+        "**Вывод:** Demo report valid; качество дальнейших циклов зависит от разметки инсайтов и метрик.",
+        "",
+    ]
+    for idx, item in enumerate(research["confirmed_findings"], start=2):
+        lines.extend([
+            f"## [{idx}] Finding",
+            f"**Гипотеза:** {item}",
+            "**Метод:** Сравнение агрегатов периода, трендов, фидбека и связей с метриками.",
+            f"**Наблюдение:** {item}",
+            "**Интерпретация:** На демо это можно показывать как исследовательский вывод агента.",
+            "**Вывод:** Accepted for demo; требует накопления истории для production-политики.",
+            "",
+        ])
     if reason:
-        summary = summary.rstrip() + f"\n\n## LLM Research Status\n- Fallback used: {reason}\n"
-        journal = journal.rstrip() + f"\n\n## LLM Research Status\n- Fallback used: {reason}\n"
-    return {
+        lines.extend([
+            "## LLM Research Status",
+            f"- Stable renderer used because: {reason}",
+            "",
+        ])
+    return "\n".join(lines)
+
+
+def _fallback_research(report: dict, reason: str = "") -> dict:
+    findings = _demo_confirmed_findings(report)
+    gaps = _demo_data_gaps(report)
+    advisories = _demo_advisories(report)
+    causal_chains = _demo_causal_chains(report)
+    rejected = _demo_rejected_hypotheses(report)
+    tasks = _demo_task_candidates(gaps, advisories)
+    executive_summary = (
+        f"Reflection-agent собрал за период {report['scope']['sent_news']} новостей, "
+        f"{report['scope']['insights']} инсайтов и {report['scope']['news_feedback'] + report['scope']['insight_feedback']} реакций. "
+        "Главная демонстрационная ценность: агент показывает не только новости, а что повторяется, что менеджеры считают шумом, "
+        "какие действия можно предложить и каких данных не хватает для уверенных правил."
+    )
+    research = {
         "research_mode": "fallback",
-        "title": f"Reflection report: {report['cycle']}",
-        "executive_summary": "",
-        "summary_md": summary,
-        "journal_md": journal,
-        "sections": [],
-        "confirmed_findings": [item.get("title", str(item)) if isinstance(item, dict) else str(item) for item in report.get("meta_insights", [])],
-        "strong_hypotheses": [],
-        "weak_hypotheses": [],
-        "insights": report.get("meta_insights", []),
-        "causal_chains": [],
-        "advisories": report.get("feedback_adjustments", []),
-        "external_context": [],
-        "data_gaps": [{"id": f"GAP-{idx:02d}", "gap": gap} for idx, gap in enumerate(report.get("data_gaps", []), start=1)],
-        "methodology_gaps": [],
-        "system_gaps": [],
-        "playbook_gaps": [],
-        "task_candidates": [
-            {"title": gap, "priority": "medium", "effect": gap, "confidence": "medium"}
-            for gap in report.get("data_gaps", [])
+        "title": f"Глубокий отчёт AI Visor: {report['cycle']}",
+        "executive_summary": executive_summary,
+        "sections": [
+            {"title": "Было → стало", "body": "От дайджеста отдельных новостей к исследовательскому отчёту с findings/advisory/gaps."},
+            {"title": "Подтверждённые выводы", "body": " ".join(findings[:3])},
         ],
-        "rejected_hypotheses": [],
-        "open_questions": [],
-        "memory_updates": [],
+        "confirmed_findings": findings,
+        "strong_hypotheses": findings[:3],
+        "weak_hypotheses": [_as_text(item) for item in report.get("data_gaps", [])],
+        "insights": report.get("meta_insights", []),
+        "causal_chains": causal_chains,
+        "advisories": advisories,
+        "external_context": [],
+        "data_gaps": gaps,
+        "methodology_gaps": ["Нужны accepted examples связей новость→метрика→действие для каждого ГОСБ."],
+        "system_gaps": ["Нужно включить стабильный LLM-research cron или отдельный быстрый research agent profile."],
+        "playbook_gaps": ["Пока нет утверждённого playbook, какие рекомендации ГОСБ должен делать по каждому типу инсайта."],
+        "task_candidates": tasks,
+        "rejected_hypotheses": rejected,
+        "open_questions": [
+            "Какие типы инсайтов менеджеры считают реально полезными после демо?",
+            "Какие категории новостей нужно понизить из-за boring feedback?",
+            "Какие метрики ГОСБ важнее всего связать с новостями в следующей итерации?",
+        ],
+        "memory_updates": [
+            "Для demo daily-report показывать findings/advisory/gaps, а не только список новостей.",
+            "Категории с boring feedback требуют более сильного evidence.",
+        ],
         "error": reason,
     }
+    research["summary_md"] = _demo_summary_md(report, research, reason)
+    research["journal_md"] = _demo_journal_md(report, research, reason)
+    return research
 
 
 def _normalize_research(raw: dict, report: dict) -> dict:
