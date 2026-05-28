@@ -16,6 +16,7 @@ if str(_SRC_PATH) not in sys.path:
     sys.path.insert(0, str(_SRC_PATH))
 
 import argparse
+from datetime import datetime
 import json
 import os
 import re
@@ -49,6 +50,7 @@ MAX_ITEMS = int(os.getenv("INSIGHT_MAX_ITEMS", "0"))
 INSIGHTS_THREAD_ID = os.getenv("INSIGHTS_THREAD_ID", "").strip()
 INSIGHTS_THREAD_IDS = os.getenv("INSIGHTS_THREAD_IDS", "").strip()
 INSIGHTS_CHAT_ID = os.getenv("INSIGHTS_CHAT_ID", "").strip()
+REPORTS_DIR = Path(os.getenv("INSIGHT_REPORTS_DIR", _REPO_ROOT / "agents/reflection_insights_agent/workspace/reports"))
 
 
 def _chunked(items: list[dict], size: int) -> Iterable[list[dict]]:
@@ -175,6 +177,498 @@ def _dedupe_key(item: dict) -> str:
     text = re.sub(r"[^а-яёa-z0-9]+", " ", text)
     return " ".join(text.split())[:260]
 
+
+
+def _safe_run_id(run_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(run_id or "").strip()).strip(".-")
+    return safe[:120] or "run"
+
+
+def _run_report_dir(run_id: str) -> Path:
+    return Path(REPORTS_DIR) / _safe_run_id(run_id)
+
+
+def _count_actions(rows: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        action = str(row.get("action") or "unknown")
+        counts[action] = counts.get(action, 0) + 1
+    return counts
+
+
+def _group_by(rows: list[dict], key: str) -> dict[int, list[dict]]:
+    grouped: dict[int, list[dict]] = {}
+    for row in rows:
+        value = row.get(key)
+        if value is None:
+            continue
+        grouped.setdefault(int(value), []).append(row)
+    return grouped
+
+
+def _collect_run_scope(run_id: str) -> dict:
+    with get_conn() as conn:
+        sent_total = conn.execute(
+            "SELECT COUNT(*) AS c FROM sent_news WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()["c"]
+        gosbs = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT g.id AS gosb_id, g.name AS gosb_name, COUNT(*) AS sent_news
+                FROM sent_news s
+                JOIN gosb_config g ON g.id = s.gosb_id
+                WHERE s.run_id = ?
+                GROUP BY g.id, g.name
+                ORDER BY sent_news DESC, g.name
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+        classifications = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    COALESCE(nc.category, 'unknown') AS category,
+                    COALESCE(nc.impact, 'unknown') AS impact,
+                    COUNT(*) AS count
+                FROM sent_news s
+                LEFT JOIN news_classification nc
+                    ON nc.gosb_id = s.gosb_id
+                   AND nc.news_id = s.news_id
+                   AND nc.mode = 'live'
+                WHERE s.run_id = ?
+                GROUP BY COALESCE(nc.category, 'unknown'), COALESCE(nc.impact, 'unknown')
+                ORDER BY count DESC, category
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+    return {
+        "sent_news_total": int(sent_total or 0),
+        "gosbs": gosbs,
+        "classifications": classifications,
+    }
+
+
+def _collect_news_feedback(run_id: str) -> list[dict]:
+    with get_conn() as conn:
+        return [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    f.action,
+                    COALESCE(f.comment, '') AS comment,
+                    COALESCE(f.username, '') AS username,
+                    f.created_at,
+                    r.title AS news_title,
+                    r.source,
+                    g.name AS gosb_name
+                FROM sent_news s
+                JOIN raw_news r ON r.id = s.news_id
+                JOIN gosb_config g ON g.id = s.gosb_id
+                JOIN feedback f
+                    ON f.news_id = s.news_id
+                   AND (f.gosb_id IS NULL OR f.gosb_id = s.gosb_id)
+                WHERE s.run_id = ?
+                ORDER BY f.created_at DESC
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+
+
+def _collect_weak_signal_rows(run_id: str) -> list[dict]:
+    with get_conn() as conn:
+        return [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    r.id AS news_id,
+                    r.title,
+                    r.source,
+                    r.url,
+                    COALESCE(s.summary, '') AS summary,
+                    COALESCE(nc.category, '') AS category,
+                    COALESCE(nc.impact, '') AS impact,
+                    COALESCE(nc.confidence, 0) AS confidence,
+                    COALESCE(nc.reject_reason, '') AS reject_reason,
+                    g.name AS gosb_name
+                FROM sent_news s
+                JOIN raw_news r ON r.id = s.news_id
+                JOIN gosb_config g ON g.id = s.gosb_id
+                LEFT JOIN news_classification nc
+                    ON nc.gosb_id = s.gosb_id
+                   AND nc.news_id = s.news_id
+                   AND nc.mode = 'live'
+                WHERE s.run_id = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM insight_news_links l
+                      JOIN insights i ON i.id = l.insight_id
+                      WHERE i.run_id = s.run_id
+                        AND i.gosb_id = s.gosb_id
+                        AND l.news_id = s.news_id
+                  )
+                ORDER BY COALESCE(nc.confidence, 0) DESC, r.id
+                LIMIT 30
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+
+
+def _collect_insight_rows(run_id: str) -> list[dict]:
+    with get_conn() as conn:
+        insight_rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    i.id,
+                    i.gosb_id,
+                    g.name AS gosb_name,
+                    i.run_id,
+                    i.title,
+                    i.insight_type,
+                    i.priority,
+                    i.confidence,
+                    COALESCE(i.why_it_matters, '') AS why_it_matters,
+                    COALESCE(i.suggested_action, '') AS suggested_action,
+                    COALESCE(i.owner_hint, '') AS owner_hint,
+                    COALESCE(i.evidence, '') AS evidence,
+                    COALESCE(i.status, '') AS status,
+                    i.created_at
+                FROM insights i
+                JOIN gosb_config g ON g.id = i.gosb_id
+                WHERE i.run_id = ?
+                ORDER BY
+                    CASE i.priority WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
+                    i.confidence DESC,
+                    i.id
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+        metric_rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    l.insight_id,
+                    l.metric_key,
+                    COALESCE(l.metric_name, '') AS metric_name,
+                    COALESCE(l.impact, '') AS impact,
+                    COALESCE(l.confidence, 0) AS confidence,
+                    COALESCE(l.reason, '') AS reason
+                FROM insight_metric_links l
+                JOIN insights i ON i.id = l.insight_id
+                WHERE i.run_id = ?
+                ORDER BY l.insight_id, l.metric_key
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+        news_rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    l.insight_id,
+                    r.id AS news_id,
+                    r.title,
+                    r.source,
+                    r.url
+                FROM insight_news_links l
+                JOIN insights i ON i.id = l.insight_id
+                JOIN raw_news r ON r.id = l.news_id
+                WHERE i.run_id = ?
+                ORDER BY l.insight_id, r.id
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+        feedback_rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    f.insight_id,
+                    f.action,
+                    COALESCE(f.comment, '') AS comment,
+                    COALESCE(f.username, '') AS username,
+                    f.created_at
+                FROM insight_feedback f
+                JOIN insights i ON i.id = f.insight_id
+                WHERE i.run_id = ?
+                ORDER BY f.created_at DESC
+                """,
+                (run_id,),
+            ).fetchall()
+        ]
+
+    metrics_by_insight = _group_by(metric_rows, "insight_id")
+    news_by_insight = _group_by(news_rows, "insight_id")
+    feedback_by_insight = _group_by(feedback_rows, "insight_id")
+
+    cards = []
+    for row in insight_rows:
+        insight_id = int(row["id"])
+        metrics = metrics_by_insight.get(insight_id, [])
+        news = news_by_insight.get(insight_id, [])
+        feedback = feedback_by_insight.get(insight_id, [])
+        confidence = float(row.get("confidence") or 0)
+        evidence_grade = "A" if confidence >= 0.85 and metrics and len(news) >= 2 else "B" if confidence >= 0.8 and news else "C"
+        cards.append({
+            "id": insight_id,
+            "gosb_id": row["gosb_id"],
+            "gosb_name": row["gosb_name"],
+            "title": row["title"],
+            "type": row["insight_type"],
+            "priority": row["priority"],
+            "confidence": confidence,
+            "evidence_grade": evidence_grade,
+            "why_it_matters": row["why_it_matters"],
+            "suggested_action": row["suggested_action"],
+            "owner_hint": row["owner_hint"],
+            "evidence": row["evidence"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "metric_links": metrics,
+            "source_news": news,
+            "feedback": {
+                "counts": _count_actions(feedback),
+                "comments": [item for item in feedback if item.get("comment")],
+            },
+        })
+    return cards
+
+
+def _build_data_gaps(scope: dict, insights: list[dict], news_feedback: list[dict], weak_signals: list[dict]) -> list[str]:
+    gaps: list[str] = []
+    if not scope.get("sent_news_total"):
+        gaps.append("В run нет отправленных новостей; рефлексия не может проверить качество отбора.")
+    if not insights:
+        gaps.append("Не сформировано ни одного инсайта; нужно проверить пороги качества или входной контекст.")
+    no_metric_count = sum(1 for item in insights if not item.get("metric_links"))
+    if no_metric_count:
+        gaps.append(f"{no_metric_count} инсайт(ов) без привязки к метрике; нужна доразметка методологии или более явное обоснование.")
+    if not news_feedback and not any(item.get("feedback", {}).get("counts") for item in insights):
+        gaps.append("Нет экспертных реакций по новостям/инсайтам для этого run; калибровка качества ограничена.")
+    if len(weak_signals) >= 10:
+        gaps.append("Много отправленных новостей не стали инсайтами; стоит проверить шум в отборе или повысить требования к отправке.")
+    return gaps
+
+
+def build_reflection_report(run_id: str) -> dict:
+    init_db()
+    scope = _collect_run_scope(run_id)
+    insights = _collect_insight_rows(run_id)
+    news_feedback = _collect_news_feedback(run_id)
+    weak_signals = _collect_weak_signal_rows(run_id)
+    data_gaps = _build_data_gaps(scope, insights, news_feedback, weak_signals)
+    return {
+        "run_id": run_id,
+        "generated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "scope": scope,
+        "insights": insights,
+        "feedback": {
+            "news_counts": _count_actions(news_feedback),
+            "news_comments": [item for item in news_feedback if item.get("comment")],
+            "insight_counts": _count_actions([
+                {"action": action}
+                for insight in insights
+                for action, count in insight.get("feedback", {}).get("counts", {}).items()
+                for _ in range(count)
+            ]),
+        },
+        "data_gaps": data_gaps,
+        "not_promoted_to_insight": weak_signals,
+    }
+
+
+def _action_counts_text(counts: dict[str, int]) -> str:
+    if not counts:
+        return "нет реакций"
+    return ", ".join(f"{key}: {value}" for key, value in sorted(counts.items()))
+
+
+def _reflection_summary_markdown(report: dict) -> str:
+    scope = report["scope"]
+    insights = report["insights"]
+    lines = [
+        f"# Reflection Report: {report['run_id']}",
+        "",
+        f"- Generated at: {report['generated_at']}",
+        f"- Sent news: {scope.get('sent_news_total', 0)}",
+        f"- Insight cards: {len(insights)}",
+        f"- News feedback: {_action_counts_text(report['feedback']['news_counts'])}",
+        f"- Insight feedback: {_action_counts_text(report['feedback']['insight_counts'])}",
+        "",
+        "## Executive Summary",
+    ]
+    if insights:
+        top = insights[:3]
+        for item in top:
+            lines.append(
+                f"- [{item['priority']}/{item['evidence_grade']}] {item['gosb_name']}: {item['title']} "
+                f"(confidence {item['confidence']:.2f})"
+            )
+    else:
+        lines.append("- No insight cards passed the quality gate.")
+
+    lines.extend(["", "## Run Scope"])
+    if scope.get("gosbs"):
+        lines.extend([
+            "| GOSB | Sent news |",
+            "| --- | ---: |",
+        ])
+        for row in scope["gosbs"]:
+            lines.append(f"| {row['gosb_name']} | {row['sent_news']} |")
+    else:
+        lines.append("No sent news found for this run.")
+
+    lines.extend(["", "## Insight Cards"])
+    if insights:
+        lines.extend([
+            "| ID | GOSB | Priority | Type | Confidence | Insight |",
+            "| ---: | --- | --- | --- | ---: | --- |",
+        ])
+        for item in insights:
+            title = str(item["title"]).replace("|", "\\|")
+            lines.append(
+                f"| {item['id']} | {item['gosb_name']} | {item['priority']} | {item['type']} | "
+                f"{item['confidence']:.2f} | {title} |"
+            )
+    else:
+        lines.append("No insight cards.")
+
+    lines.extend(["", "## Metric Hypotheses"])
+    if insights:
+        for item in insights:
+            if item["metric_links"]:
+                for metric in item["metric_links"]:
+                    metric_name = metric.get("metric_name") or metric.get("metric_key")
+                    lines.append(
+                        f"- Insight {item['id']}: {metric_name} "
+                        f"({metric.get('impact') or 'context'}, confidence {float(metric.get('confidence') or 0):.2f})"
+                    )
+            else:
+                lines.append(f"- Insight {item['id']}: no defensible metric link found.")
+    else:
+        lines.append("- No metric hypotheses.")
+
+    lines.extend(["", "## Feedback Themes"])
+    lines.append(f"- News reactions: {_action_counts_text(report['feedback']['news_counts'])}")
+    lines.append(f"- Insight reactions: {_action_counts_text(report['feedback']['insight_counts'])}")
+    comments = report["feedback"].get("news_comments", [])[:5]
+    for comment in comments:
+        lines.append(f"- News comment from {comment.get('username') or 'unknown'}: {comment.get('comment')}")
+
+    lines.extend(["", "## Data Gaps"])
+    if report["data_gaps"]:
+        lines.extend(f"- {gap}" for gap in report["data_gaps"])
+    else:
+        lines.append("- No critical data gaps detected.")
+
+    lines.extend(["", "## Not Promoted To Insight"])
+    weak_signals = report.get("not_promoted_to_insight", [])[:10]
+    if weak_signals:
+        for item in weak_signals:
+            lines.append(
+                f"- {item['gosb_name']}: {item['title']} "
+                f"({item.get('category') or 'unknown'}, {float(item.get('confidence') or 0):.2f})"
+            )
+    else:
+        lines.append("- Every sent news item was attached to at least one insight or there were no sent items.")
+
+    lines.extend(["", "## Next Actions"])
+    if insights:
+        for item in insights[:5]:
+            lines.append(f"- Insight {item['id']}: {item['suggested_action']}")
+    else:
+        lines.append("- Re-run reflection after enough sent news and feedback accumulate.")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _reflection_journal_markdown(report: dict) -> str:
+    lines = [
+        f"# Reflection Journal: {report['run_id']}",
+        "",
+        "## Hypothesis Plan",
+        "- Проверить, какие отправленные новости могут повлиять на клиентов, риски, LPR/GR, конкурентов или управленческие метрики ГОСБа.",
+        "- Для каждого сильного сигнала связать рекомендацию с новостным доказательством и доступной метрикой, если связь объяснима.",
+        "- Отдельно зафиксировать слабые сигналы, фидбек и пробелы данных.",
+        "",
+        "## Evidence Entries",
+    ]
+    if report["insights"]:
+        for item in report["insights"]:
+            titles = "; ".join(news["title"] for news in item.get("source_news", [])[:3]) or "source news missing"
+            metrics = "; ".join(
+                (metric.get("metric_name") or metric.get("metric_key") or "metric")
+                for metric in item.get("metric_links", [])
+            ) or "metric link not established"
+            lines.extend([
+                f"### Insight {item['id']}: {item['title']}",
+                f"- Hypothesis: {item['why_it_matters']}",
+                f"- Method: compared sent news, classification context, metric links and expert feedback for {item['gosb_name']}.",
+                f"- Evidence: {titles}",
+                f"- Metric check: {metrics}",
+                f"- Interpretation: confidence {item['confidence']:.2f}, evidence grade {item['evidence_grade']}.",
+                f"- Decision: {item['suggested_action']}",
+                "",
+            ])
+    else:
+        lines.extend(["- No insight passed the quality gate.", ""])
+
+    lines.extend(["## Rejected Or Weak Signals"])
+    weak_signals = report.get("not_promoted_to_insight", [])
+    if weak_signals:
+        for item in weak_signals[:15]:
+            lines.append(
+                f"- {item['gosb_name']}: {item['title']} was not promoted; "
+                f"category={item.get('category') or 'unknown'}, confidence={float(item.get('confidence') or 0):.2f}."
+            )
+    else:
+        lines.append("- No separate weak signals recorded.")
+
+    lines.extend(["", "## Data Gaps"])
+    if report["data_gaps"]:
+        lines.extend(f"- {gap}" for gap in report["data_gaps"])
+    else:
+        lines.append("- No critical data gaps detected.")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_reflection_report(run_id: str) -> dict:
+    report = build_reflection_report(run_id)
+    report_dir = _run_report_dir(run_id)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_path = report_dir / "summary.md"
+    json_path = report_dir / "insights.json"
+    journal_path = report_dir / "journal.md"
+
+    summary_path.write_text(_reflection_summary_markdown(report), encoding="utf-8")
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    journal_path.write_text(_reflection_journal_markdown(report), encoding="utf-8")
+
+    return {
+        "report_dir": str(report_dir),
+        "summary_path": str(summary_path),
+        "json_path": str(json_path),
+        "journal_path": str(journal_path),
+        "insights_count": len(report["insights"]),
+    }
 
 def get_sent_news_for_run(gosb_id: int, run_id: str) -> list[dict]:
     with get_conn() as conn:
@@ -359,6 +853,7 @@ def generate_insights(
     batch_size: int = BATCH_SIZE,
     max_items: int = MAX_ITEMS,
     disable_llm: bool = False,
+    write_report: bool = True,
 ) -> int:
     init_db()
     gosbs = [dict(row) for row in get_active_gosbs()]
@@ -417,6 +912,9 @@ def generate_insights(
         print(f"  ✅ Инсайтов сохранено: {saved_for_gosb}")
 
     print(f"✅ Инсайты готовы: {total_saved}")
+    if write_report:
+        report_info = write_reflection_report(run_id)
+        print(f"📝 Отчёт рефлексии: {report_info['summary_path']}")
     return total_saved
 
 
@@ -555,9 +1053,16 @@ def main() -> None:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--no-llm", action="store_true")
     parser.add_argument("--send", action="store_true")
+    parser.add_argument("--report-only", action="store_true", help="write reflection report without generating new insights")
+    parser.add_argument("--no-report", action="store_true", help="skip reflection report generation")
     args = parser.parse_args()
 
-    generate_insights(args.run_id, disable_llm=args.no_llm)
+    if args.report_only:
+        report_info = write_reflection_report(args.run_id)
+        print(f"📝 Отчёт рефлексии: {report_info['summary_path']}")
+        return
+
+    generate_insights(args.run_id, disable_llm=args.no_llm, write_report=not args.no_report)
     if args.send:
         send_insights(args.run_id)
 

@@ -2,7 +2,9 @@
 
 ## Files
 
-- `/home/user1/gosb_bot/agents/reflection_insights_agent/workspace/insights.py` - insight generation and sending logic.
+- `/home/user1/gosb_bot/agents/reflection_insights_agent/workspace/insights.py` - insight generation, report writing and sending logic.
+- `/home/user1/gosb_bot/agents/reflection_insights_agent/workspace/REFLECTION_PROTOCOL.md` - research protocol.
+- `/home/user1/gosb_bot/agents/reflection_insights_agent/workspace/REPORT_FORMAT.md` - report artifact contract.
 - `/home/user1/gosb_bot/data/news_bot.db` - sent news, feedback, insights and knowledge documents.
 - `/home/user1/gosb_bot/plugins/openclaw-feedback` - feedback handling for insight reactions/comments.
 
