@@ -11,6 +11,8 @@ import FeedbackPage from './pages/Feedback';
 import KnowledgePage from './pages/Knowledge';
 import SettingsPage from './pages/Settings';
 import ChatPage from './pages/Chat';
+import ReportsPage from './pages/Reports';
+import AgentStructurePage from './pages/AgentStructure';
 import { api } from './api/client';
 
 const { Content } = Layout;
@@ -107,7 +109,10 @@ function Shell() {
             <Route path="/gosbs" element={<GosbsPage />} />
             <Route path="/feedback" element={<FeedbackPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/agent/chat" element={<ChatPage />} />
+            <Route path="/agent/structure" element={<AgentStructurePage />} />
+            <Route path="/chat" element={<Navigate to="/agent/chat" replace />} />
+            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

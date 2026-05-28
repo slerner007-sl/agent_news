@@ -12,6 +12,8 @@ import {
   RobotOutlined,
   CloudServerOutlined,
   BarChartOutlined,
+  FileTextOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 
 const { Header } = Layout;
@@ -22,19 +24,6 @@ interface AppHeaderProps {
   dbExists?: boolean;
 }
 
-const navItems = [
-  { key: 'dashboard', path: '/', icon: <DashboardOutlined />, label: 'Сводка' },
-  { key: 'news', path: '/news', icon: <ReadOutlined />, label: 'Новости' },
-  { key: 'insights', path: '/insights', icon: <BulbOutlined />, label: 'Инсайты' },
-  { key: 'gosbs', path: '/gosbs', icon: <TeamOutlined />, label: 'ГОСБ' },
-  { key: 'feedback', path: '/feedback', icon: <MessageOutlined />, label: 'Обратная связь' },
-  { key: 'knowledge', path: '/knowledge', icon: <BookOutlined />, label: 'База знаний' },
-  { key: 'chat', path: '/chat', icon: <RobotOutlined />, label: 'Агент' },
-  { key: 'sources', path: '', icon: <CloudServerOutlined />, label: 'Источники', disabled: true },
-  { key: 'analytics', path: '', icon: <BarChartOutlined />, label: 'Аналитика', disabled: true },
-  { key: 'settings', path: '/settings', icon: <SettingOutlined />, label: 'Настройки' },
-];
-
 export default function AppHeader({ healthStatus = 'unknown' }: AppHeaderProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -42,14 +31,58 @@ export default function AppHeader({ healthStatus = 'unknown' }: AppHeaderProps) 
   const getSelected = () => {
     const p = location.pathname;
     if (p === '/' || p.startsWith('/dashboard')) return 'dashboard';
-    for (const it of navItems) {
-      if (it.path && it.path !== '/' && p.startsWith(it.path)) return it.key;
-    }
+    if (p === '/agent/chat') return 'agent-chat';
+    if (p === '/agent/structure') return 'agent-structure';
+    if (p.startsWith('/news')) return 'news';
+    if (p.startsWith('/insights')) return 'insights';
+    if (p.startsWith('/gosbs')) return 'gosbs';
+    if (p.startsWith('/feedback')) return 'feedback';
+    if (p.startsWith('/knowledge')) return 'knowledge';
+    if (p.startsWith('/reports')) return 'reports';
+    if (p.startsWith('/settings')) return 'settings';
     return 'dashboard';
+  };
+
+  const getOpenKeys = () => {
+    const p = location.pathname;
+    if (p.startsWith('/agent')) return ['agent'];
+    return [];
   };
 
   const isIdle = healthStatus === 'ok';
   const isDown = healthStatus === 'down';
+
+  const menuItems = [
+    { key: 'dashboard', icon: <DashboardOutlined />, label: 'Сводка', onClick: () => navigate('/') },
+    { key: 'news', icon: <ReadOutlined />, label: 'Новости', onClick: () => navigate('/news') },
+    { key: 'insights', icon: <BulbOutlined />, label: 'Инсайты', onClick: () => navigate('/insights') },
+    { key: 'gosbs', icon: <TeamOutlined />, label: 'ГОСБ', onClick: () => navigate('/gosbs') },
+    { key: 'feedback', icon: <MessageOutlined />, label: 'Обр. связь', onClick: () => navigate('/feedback') },
+    { key: 'knowledge', icon: <BookOutlined />, label: 'База знаний', onClick: () => navigate('/knowledge') },
+    {
+      key: 'agent',
+      icon: <RobotOutlined />,
+      label: 'Агент',
+      children: [
+        { key: 'agent-chat', icon: <MessageOutlined />, label: 'Чат с агентом', onClick: () => navigate('/agent/chat') },
+        { key: 'agent-structure', icon: <ApartmentOutlined />, label: 'Структура агента', onClick: () => navigate('/agent/structure') },
+      ],
+    },
+    { key: 'reports', icon: <FileTextOutlined />, label: 'Отчёты', onClick: () => navigate('/reports') },
+    {
+      key: 'sources',
+      icon: <CloudServerOutlined />,
+      label: <Tooltip title="Скоро"><span style={{ color: 'rgba(0, 0, 0, 0.25)' }}>Источники</span></Tooltip>,
+      disabled: true,
+    },
+    {
+      key: 'analytics',
+      icon: <BarChartOutlined />,
+      label: <Tooltip title="Скоро"><span style={{ color: 'rgba(0, 0, 0, 0.25)' }}>Аналитика</span></Tooltip>,
+      disabled: true,
+    },
+    { key: 'settings', icon: <SettingOutlined />, label: 'Настройки', onClick: () => navigate('/settings') },
+  ];
 
   return (
     <Header
@@ -86,20 +119,9 @@ export default function AppHeader({ healthStatus = 'unknown' }: AppHeaderProps) 
         <Menu
           mode="horizontal"
           selectedKeys={[getSelected()]}
-          style={{ background: 'transparent', border: 'none', minWidth: 820 }}
-          items={navItems.map((it) => ({
-            key: it.key,
-            icon: it.icon,
-            label: it.disabled ? (
-              <Tooltip title="Скоро">
-                <span style={{ color: 'rgba(0, 0, 0, 0.25)' }}>{it.label}</span>
-              </Tooltip>
-            ) : (
-              it.label
-            ),
-            disabled: it.disabled,
-            onClick: it.disabled ? undefined : () => navigate(it.path),
-          }))}
+          defaultOpenKeys={getOpenKeys()}
+          style={{ background: 'transparent', border: 'none', minWidth: 900 }}
+          items={menuItems}
         />
       </div>
 
