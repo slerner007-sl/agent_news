@@ -802,7 +802,7 @@ def _demo_summary_md(report: dict, research: dict, reason: str = "") -> str:
     period = report["period"]
     scope = report["scope"]
     lines = [
-        f"# Глубокий отчёт AI Visor за период {period['start']} — {period['end']}",
+        f"# Отчёт агента рефлексии по новостям ГОСБ за период {period['start']} — {period['end']}",
         "",
         research["executive_summary"],
         "",
@@ -846,7 +846,7 @@ def _demo_summary_md(report: dict, research: dict, reason: str = "") -> str:
 def _demo_journal_md(report: dict, research: dict, reason: str = "") -> str:
     period = report["period"]
     lines = [
-        f"# Journal — AI Visor reflection demo ({period['start']} — {period['end']})",
+        f"# Journal — Reflection news agent demo ({period['start']} — {period['end']})",
         "",
         "Mission: показать на демо, что агент рефлексии не пересказывает новости, а исследует качество сигналов, фидбек, пробелы данных и возможные действия.",
         "",
@@ -896,7 +896,7 @@ def _fallback_research(report: dict, reason: str = "") -> dict:
     )
     research = {
         "research_mode": "fallback",
-        "title": f"Глубокий отчёт AI Visor: {report['cycle']}",
+        "title": f"Отчёт агента рефлексии по новостям ГОСБ: {report['cycle']}",
         "executive_summary": executive_summary,
         "sections": [
             {"title": "Было → стало", "body": "От дайджеста отдельных новостей к исследовательскому отчёту с findings/advisory/gaps."},
