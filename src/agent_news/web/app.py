@@ -29,7 +29,7 @@ def _cors_origins() -> list[str]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Agent News Dashboard API",
+        title="AI Visor API",
         version="0.1.0",
         description=(
             "Interactive API on top of the OpenClaw / Agent News SQLite database. "

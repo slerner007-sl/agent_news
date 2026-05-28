@@ -25,7 +25,7 @@ export default function GosbsPage() {
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div>
         <div className="section-title">ГОСБ</div>
-        <Text className="dim">Конфигурация региональных подписчиков диспетчерской.</Text>
+        <Text className="dim">Конфигурация региональных подписчиков AI Visor.</Text>
       </div>
       {error && <Alert type="error" message={error} showIcon />}
       {loading && (

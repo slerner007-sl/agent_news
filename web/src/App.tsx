@@ -18,21 +18,53 @@ const { Content } = Layout;
 const appTheme = {
   algorithm: theme.defaultAlgorithm,
   token: {
-    colorPrimary: '#0a84ff',
+    colorPrimary: '#007aff',
     colorBgBase: '#f5f5f7',
     colorBgContainer: '#ffffff',
+    colorBgElevated: '#ffffff',
     colorText: '#1d1d1f',
-    colorTextSecondary: '#6e6e73',
+    colorTextSecondary: '#86868b',
     colorBorder: 'rgba(0, 0, 0, 0.08)',
-    borderRadius: 14,
+    borderRadius: 16,
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, sans-serif",
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
   },
   components: {
-    Card: { borderRadius: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-    Button: { borderRadius: 10 },
-    Menu: { itemBg: 'transparent', itemColor: '#1d1d1f', itemSelectedColor: '#0a84ff' },
-    Table: { headerBg: '#fafafa' },
+    Card: {
+      colorBgContainer: '#ffffff',
+      borderRadius: 16,
+      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+    },
+    Button: {
+      borderRadius: 10,
+      paddingContentHorizontal: 24,
+    },
+    Select: {
+      colorBgContainer: '#ffffff',
+      colorBgElevated: '#ffffff',
+      borderRadius: 10,
+    },
+    Input: {
+      colorBgContainer: '#ffffff',
+      borderRadius: 10,
+    },
+    Menu: {
+      colorBgContainer: 'transparent',
+      itemBg: 'transparent',
+      itemColor: '#1d1d1f',
+      itemSelectedColor: '#007aff',
+      borderRadius: 10,
+    },
+    Table: {
+      colorBgContainer: 'transparent',
+      headerBg: '#ffffff',
+    },
+    Modal: {
+      contentBg: '#ffffff',
+      headerBg: 'transparent',
+      borderRadius: 16,
+    },
     Tag: { borderRadius: 8 },
   },
 };

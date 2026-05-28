@@ -25,7 +25,7 @@ export default function SettingsPage() {
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div>
         <div className="section-title">Настройки</div>
-        <Text className="dim">Состояние API диспетчерской.</Text>
+        <Text className="dim">Состояние API и конфигурация AI Visor.</Text>
       </div>
 
       {error && <Alert type="error" showIcon message={error} />}

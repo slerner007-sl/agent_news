@@ -75,9 +75,9 @@ export default function Dashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div className="section-title" style={{ marginBottom: 4 }}>
-            Сводка диспетчерской
+            Сводка мониторинга
           </div>
-          <Text className="dim">Источники, инсайты и реакция за выбранный горизонт.</Text>
+          <Text className="dim">Ключевые события и метрики за выбранный период</Text>
         </div>
         <Segmented
           value={horizon}

@@ -77,7 +77,7 @@ export default function ChatPage() {
                   maxWidth: '80%',
                   padding: '10px 14px',
                   borderRadius: 14,
-                  background: m.role === 'user' ? '#0a84ff' : '#f0f0f0',
+                  background: m.role === 'user' ? '#007aff' : 'rgba(0, 0, 0, 0.04)',
                   color: m.role === 'user' ? '#fff' : '#1d1d1f',
                 }}
               >
