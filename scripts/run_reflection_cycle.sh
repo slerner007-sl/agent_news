@@ -18,4 +18,9 @@ if [ "${REFLECTION_REPORT_SEND:-1}" = "1" ]; then
   send_flag=(--send)
 fi
 
-python3 -m agent_news.reflection_cycles --cycle "$cycle" "${send_flag[@]}"
+llm_flag=()
+if [ "${REFLECTION_REPORT_NO_LLM:-0}" = "1" ]; then
+  llm_flag=(--no-llm)
+fi
+
+python3 -m agent_news.reflection_cycles --cycle "$cycle" "${send_flag[@]}" "${llm_flag[@]}"

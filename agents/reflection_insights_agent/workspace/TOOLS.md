@@ -30,3 +30,11 @@ PYTHONPATH=/home/user1/gosb_bot/src python3 -m agent_news.reflection_cycles --cy
 
 Cron entrypoint: `/home/user1/gosb_bot/scripts/run_reflection_cycle.sh weekly|strategic`.
 Set `REFLECTION_REPORT_CHAT_ID` and optionally `REFLECTION_REPORT_THREAD_ID` to send reports to Telegram.
+
+LLM research can be disabled for deterministic tests:
+
+```bash
+PYTHONPATH=/home/user1/gosb_bot/src python3 -m agent_news.reflection_cycles --cycle daily --days 1 --no-llm
+```
+
+Primary human report file for cycle outputs is `report.md`; `summary.md` is kept as a compatibility alias.

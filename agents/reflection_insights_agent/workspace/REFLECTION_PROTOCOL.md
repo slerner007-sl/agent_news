@@ -55,3 +55,7 @@ Use this structure in `journal.md`:
 - Input: month-scale news, insights, metric links and feedback.
 - Output: hidden patterns, recurring dependencies, data gaps and runtime memory updates.
 - Strategy changes remain proposals until reviewed.
+
+## LLM Research Reports
+
+Cycle reports are written by the reflection agent over an evidence pack. SQL aggregation is evidence, not the final report. The final `summary.md` and `journal.md` must contain hypotheses, methods, observations, interpretations, decisions, rejected hypotheses and open questions.

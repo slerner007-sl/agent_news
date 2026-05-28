@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -39,6 +40,7 @@ RUNTIME_MEMORY_PATH = Path(os.getenv(
     "REFLECTION_MEMORY_PATH",
     _REPO_ROOT / "agents/reflection_insights_agent/workspace/memory/runtime_memory.md",
 ))
+LLM_RESEARCH_MAX_CHARS = int(os.getenv("REFLECTION_LLM_RESEARCH_MAX_CHARS", "12000"))
 
 STOPWORDS = {
     "это", "как", "что", "для", "или", "при", "над", "под", "без", "уже", "еще",
@@ -446,6 +448,296 @@ def build_cycle_report(cycle: str, days: int | None = None) -> dict:
     }
 
 
+
+def _compact_for_llm(value: dict, max_chars: int = LLM_RESEARCH_MAX_CHARS) -> str:
+    payload = json.dumps(value, ensure_ascii=False, indent=2)
+    if len(payload) <= max_chars:
+        return payload
+    head = payload[: max_chars - 600]
+    return head + "\n...<truncated; use only visible evidence, do not invent hidden facts>..."
+
+
+def _research_depth(cycle: str) -> dict:
+    if cycle == "strategic":
+        return {"min_hypotheses": 18, "min_findings": 8, "label": "strategic/monthly"}
+    if cycle == "weekly":
+        return {"min_hypotheses": 12, "min_findings": 6, "label": "weekly"}
+    return {"min_hypotheses": 8, "min_findings": 4, "label": "daily"}
+
+
+def _llm_research_prompt(report: dict) -> str:
+    depth = _research_depth(report["cycle"])
+    evidence = {
+        "cycle": report["cycle"],
+        "period": report["period"],
+        "scope": report["scope"],
+        "deterministic_meta_insights": report["meta_insights"],
+        "feedback_adjustments": report["feedback_adjustments"],
+        "strategic_patterns": report["strategic_patterns"],
+        "data_gaps": report["data_gaps"],
+    }
+    evidence_json = _compact_for_llm(evidence)
+    return f"""Ты — reflection agent новостного пайплайна ГОСБ.
+
+Твоя задача — написать LLM-research отчёт поверх evidence pack. Это не SQL-сводка и не пересказ новостей.
+Работай как исследователь: гипотезы → метод → наблюдение → интерпретация → решение.
+
+Цикл: {report['cycle']} ({depth['label']}).
+Период: {report['period']['start']} → {report['period']['end']} UTC.
+
+Контекст домена:
+- Новости уже были отобраны и отправлены по ГОСБ.
+- Инсайты — рекомендации к действию для менеджеров ГОСБ.
+- Фидбек useful/boring/comment показывает, где менеджеры считают сигнал полезным или шумным.
+- Metric links — гипотезы о связи новости/инсайта с бизнес-метрикой. Не выдумывай значения метрик.
+
+Стиль отчёта как у workspace-reflection коллеги:
+- Честный короткий вывод в начале.
+- Явно отделяй факты от интерпретации.
+- Ключевые находки нумеруй как [INSIGHT-01].
+- Причинные цепочки нумеруй как [CAUSAL-01], даже если они rejected/open.
+- Advisory нумеруй как [ADV-01].
+- Data gaps нумеруй как [GAP-01].
+- Rejected hypotheses обязательны: слабые идеи тоже полезны.
+- Не публикуй уверенность там, где evidence слабый; пиши health-only / open question.
+
+Минимальная глубина:
+- research plan: минимум {depth['min_hypotheses']} гипотез с якорями [H-01]...
+- ключевые findings: минимум {depth['min_findings']}, если evidence позволяет; если нет — объясни почему.
+- минимум 2 data gaps.
+- минимум 2 rejected/open hypotheses.
+
+Evidence pack:
+```json
+{evidence_json}
+```
+
+Верни только валидный JSON без markdown fences:
+{{
+  "research_mode": "llm",
+  "title": "Глубокий отчёт ...",
+  "executive_summary": "...",
+  "summary_md": "# ...",
+  "journal_md": "# ...",
+  "sections": [
+    {{"title": "Было → стало", "body": "..."}}
+  ],
+  "confirmed_findings": ["..."],
+  "strong_hypotheses": ["..."],
+  "weak_hypotheses": ["..."],
+  "insights": [
+    {{
+      "id": "INSIGHT-01",
+      "title": "...",
+      "body": "...",
+      "evidence": ["..."],
+      "confidence": 0.0,
+      "status": "accepted|open|rejected"
+    }}
+  ],
+  "causal_chains": [
+    {{
+      "id": "CAUSAL-01",
+      "title": "...",
+      "chain": "signal -> interpretation -> action",
+      "for_role": "руководитель ГОСБ",
+      "status": "accepted|open|rejected",
+      "evidence": "...",
+      "behavior_change": "..."
+    }}
+  ],
+  "advisories": [
+    {{
+      "id": "ADV-01",
+      "title": "...",
+      "action": "...",
+      "for_role": "руководитель ГОСБ",
+      "source": "feedback|trend|metric_link|data_gap",
+      "confidence": 0.0
+    }}
+  ],
+  "external_context": [
+    {{
+      "title": "...",
+      "summary": "...",
+      "why_it_matters": "...",
+      "url": ""
+    }}
+  ],
+  "data_gaps": [
+    {{
+      "id": "GAP-01",
+      "gap": "...",
+      "why_it_matters": "...",
+      "what_to_add": "..."
+    }}
+  ],
+  "methodology_gaps": ["..."],
+  "system_gaps": ["..."],
+  "playbook_gaps": ["..."],
+  "task_candidates": [
+    {{
+      "title": "...",
+      "priority": "high|medium|low",
+      "effect": "...",
+      "confidence": "high|medium|low"
+    }}
+  ],
+  "rejected_hypotheses": [
+    {{
+      "id": "H-XX",
+      "hypothesis": "...",
+      "reason": "..."
+    }}
+  ],
+  "open_questions": ["..."],
+  "memory_updates": ["..."]
+}}
+"""
+
+
+
+def _openclaw_research_text(prompt: str) -> str:
+    from agent_news.llm_filter import OPENCLAW_BIN, OPENCLAW_MODEL, OPENCLAW_TIMEOUT, PROJECT_ROOT
+
+    result = subprocess.run(
+        [
+            OPENCLAW_BIN,
+            "agent",
+            "--agent", "main",
+            "--model", OPENCLAW_MODEL,
+            "--message", prompt,
+            "--timeout", str(OPENCLAW_TIMEOUT),
+            "--json",
+        ],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        timeout=OPENCLAW_TIMEOUT + 30,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(detail[:1000] or f"openclaw exited with {result.returncode}")
+
+    payload = json.loads(result.stdout)
+    meta = payload.get("result", {}).get("meta", {})
+    content = meta.get("finalAssistantVisibleText") or meta.get("finalAssistantRawText")
+    if not content:
+        payloads = payload.get("result", {}).get("payloads", [])
+        if payloads:
+            content = payloads[0].get("text")
+    if not content:
+        raise RuntimeError("openclaw returned no assistant text")
+    return content.strip()
+
+
+def _research_from_markdown(markdown_text: str, report: dict) -> dict:
+    summary = markdown_text.strip()
+    if not summary.startswith("#"):
+        summary = f"# Reflection report: {report['cycle']}\n\n{summary}"
+    journal = _journal_markdown(report).rstrip() + "\n\n## LLM Research Narrative\n\nThe model returned markdown instead of structured JSON. The markdown was preserved as `report.md`/`summary.md`; structured sidecar files were generated from the deterministic evidence pack.\n"
+    fallback = _fallback_research(report, "llm returned markdown instead of JSON")
+    fallback.update({
+        "research_mode": "llm_markdown",
+        "title": f"Reflection report: {report['cycle']}",
+        "summary_md": summary,
+        "journal_md": journal,
+        "error": "",
+    })
+    return fallback
+
+def _fallback_research(report: dict, reason: str = "") -> dict:
+    summary = _summary_markdown(report)
+    journal = _journal_markdown(report)
+    if reason:
+        summary = summary.rstrip() + f"\n\n## LLM Research Status\n- Fallback used: {reason}\n"
+        journal = journal.rstrip() + f"\n\n## LLM Research Status\n- Fallback used: {reason}\n"
+    return {
+        "research_mode": "fallback",
+        "title": f"Reflection report: {report['cycle']}",
+        "executive_summary": "",
+        "summary_md": summary,
+        "journal_md": journal,
+        "sections": [],
+        "confirmed_findings": [item.get("title", str(item)) if isinstance(item, dict) else str(item) for item in report.get("meta_insights", [])],
+        "strong_hypotheses": [],
+        "weak_hypotheses": [],
+        "insights": report.get("meta_insights", []),
+        "causal_chains": [],
+        "advisories": report.get("feedback_adjustments", []),
+        "external_context": [],
+        "data_gaps": [{"id": f"GAP-{idx:02d}", "gap": gap} for idx, gap in enumerate(report.get("data_gaps", []), start=1)],
+        "methodology_gaps": [],
+        "system_gaps": [],
+        "playbook_gaps": [],
+        "task_candidates": [
+            {"title": gap, "priority": "medium", "effect": gap, "confidence": "medium"}
+            for gap in report.get("data_gaps", [])
+        ],
+        "rejected_hypotheses": [],
+        "open_questions": [],
+        "memory_updates": [],
+        "error": reason,
+    }
+
+
+def _normalize_research(raw: dict, report: dict) -> dict:
+    if not isinstance(raw, dict):
+        raise ValueError("LLM research response is not an object")
+    summary_md = str(raw.get("summary_md") or "").strip()
+    journal_md = str(raw.get("journal_md") or "").strip()
+    if len(summary_md) < 200:
+        raise ValueError("LLM research summary_md is too short")
+    if len(journal_md) < 200:
+        raise ValueError("LLM research journal_md is too short")
+    normalized = {
+        "research_mode": str(raw.get("research_mode") or "llm"),
+        "cycle": report["cycle"],
+        "generated_at": report["generated_at"],
+        "period": report["period"],
+        "scope": report["scope"],
+        "title": str(raw.get("title") or f"Reflection report: {report['cycle']}").strip(),
+        "executive_summary": str(raw.get("executive_summary") or "").strip(),
+        "summary_md": summary_md,
+        "journal_md": journal_md,
+        "sections": raw.get("sections") if isinstance(raw.get("sections"), list) else [],
+        "confirmed_findings": raw.get("confirmed_findings") if isinstance(raw.get("confirmed_findings"), list) else [],
+        "strong_hypotheses": raw.get("strong_hypotheses") if isinstance(raw.get("strong_hypotheses"), list) else [],
+        "weak_hypotheses": raw.get("weak_hypotheses") if isinstance(raw.get("weak_hypotheses"), list) else [],
+        "insights": raw.get("insights") if isinstance(raw.get("insights"), list) else [],
+        "causal_chains": raw.get("causal_chains") if isinstance(raw.get("causal_chains"), list) else [],
+        "advisories": raw.get("advisories") if isinstance(raw.get("advisories"), list) else [],
+        "external_context": raw.get("external_context") if isinstance(raw.get("external_context"), list) else [],
+        "data_gaps": raw.get("data_gaps") if isinstance(raw.get("data_gaps"), list) else [],
+        "methodology_gaps": raw.get("methodology_gaps") if isinstance(raw.get("methodology_gaps"), list) else [],
+        "system_gaps": raw.get("system_gaps") if isinstance(raw.get("system_gaps"), list) else [],
+        "playbook_gaps": raw.get("playbook_gaps") if isinstance(raw.get("playbook_gaps"), list) else [],
+        "task_candidates": raw.get("task_candidates") if isinstance(raw.get("task_candidates"), list) else [],
+        "rejected_hypotheses": raw.get("rejected_hypotheses") if isinstance(raw.get("rejected_hypotheses"), list) else [],
+        "open_questions": raw.get("open_questions") if isinstance(raw.get("open_questions"), list) else [],
+        "memory_updates": raw.get("memory_updates") if isinstance(raw.get("memory_updates"), list) else [],
+    }
+    return normalized
+
+
+def build_llm_research(report: dict, disable_llm: bool = False) -> dict:
+    if disable_llm:
+        return _fallback_research(report, "llm disabled")
+    try:
+        from agent_news.llm_filter import _extract_json
+
+        content = _openclaw_research_text(_llm_research_prompt(report))
+        try:
+            raw = _extract_json(content)
+        except Exception:
+            return _research_from_markdown(content, report)
+        return _normalize_research(raw, report)
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {str(exc)[:240]}"
+        print(f"  ⚠️  LLM research fallback: {reason}")
+        return _fallback_research(report, reason)
+
 def _summary_markdown(report: dict) -> str:
     scope = report["scope"]
     lines = [
@@ -562,18 +854,94 @@ def _append_runtime_memory(report: dict) -> None:
         fh.write("\n".join(lines) + "\n")
 
 
-def write_cycle_report(cycle: str, days: int | None = None, update_memory: bool | None = None) -> dict:
+
+def _write_json(path: Path, value) -> None:
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_markdown_list(path: Path, title: str, rows, field: str = "title") -> None:
+    lines = [f"# {title}", ""]
+    if rows:
+        for row in rows:
+            if isinstance(row, dict):
+                value = row.get(field) or row.get("gap") or row.get("hypothesis") or row.get("recommendation") or row.get("action") or str(row)
+            else:
+                value = str(row)
+            lines.append(f"- {value}")
+    else:
+        lines.append("- Нет данных.")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _basic_report_html(markdown_text: str, title: str) -> str:
+    escaped = escape(markdown_text)
+    body = escaped.replace("\n", "<br/>")
+    return (
+        "<html><head><meta charset='utf-8'/>"
+        f"<title>{escape(title)}</title>"
+        "<style>body{font-family:Arial,sans-serif;max-width:960px;margin:32px auto;line-height:1.5;color:#102a43}"
+        "h1,h2{color:#0f5132}.meta{color:#52606d}</style></head><body>"
+        f"{body}</body></html>"
+    )
+
+
+def _write_delivery_bundle(report_dir: Path, report: dict, research: dict, summary_md: str) -> None:
+    _write_json(report_dir / "advisories.json", research.get("advisories", []))
+    _write_json(report_dir / "causal_chains.json", research.get("causal_chains", []))
+    _write_json(report_dir / "confirmed_findings.json", research.get("confirmed_findings", []))
+    _write_json(report_dir / "rejected_hypotheses.json", research.get("rejected_hypotheses", []))
+    _write_json(report_dir / "external_context.json", research.get("external_context", []))
+    _write_json(report_dir / "data_requests.json", research.get("data_gaps", []))
+    _write_json(report_dir / "methodology_proposals.json", research.get("methodology_gaps", []))
+    _write_json(report_dir / "system_improvement_proposals.json", research.get("system_gaps", []))
+    _write_json(report_dir / "task_candidates.json", research.get("task_candidates", []))
+    _write_json(report_dir / "playbook_gaps.json", research.get("playbook_gaps", []))
+    _write_json(report_dir / "proposals.json", [])
+    _write_json(report_dir / "was_vs_now.json", {
+        "status": "not_applicable_for_news_pipeline",
+        "reason": "GOSB news pipeline has no baseline_t0/current_prod quality table yet.",
+    })
+    _write_json(report_dir / "knowledge_health.json", {
+        "status": "partial",
+        "notes": report.get("data_gaps", []),
+    })
+    _write_json(report_dir / "context.json", {
+        "cycle": report["cycle"],
+        "period": report["period"],
+        "scope": report["scope"],
+        "research_mode": research.get("research_mode"),
+    })
+    _write_json(report_dir / "delivery.json", {
+        "channels": ["local_files"],
+        "telegram_sent": False,
+        "report_file": "report.md",
+    })
+    _write_markdown_list(report_dir / "data_requests.md", "Data requests", research.get("data_gaps", []), field="gap")
+    _write_markdown_list(report_dir / "methodology_proposals.md", "Methodology proposals", research.get("methodology_gaps", []))
+    _write_markdown_list(report_dir / "system_improvements.md", "System improvements", research.get("system_gaps", []))
+    (report_dir / "report.html").write_text(
+        _basic_report_html(summary_md, research.get("title") or f"Reflection report: {report['cycle']}"),
+        encoding="utf-8",
+    )
+
+def write_cycle_report(cycle: str, days: int | None = None, update_memory: bool | None = None, disable_llm: bool = False) -> dict:
     report = build_cycle_report(cycle, days)
     stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     report_dir = Path(REPORTS_DIR) / f"{_safe_slug(cycle)}-{stamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
     summary_path = report_dir / "summary.md"
     json_path = report_dir / "report.json"
+    insights_path = report_dir / "insights.json"
     journal_path = report_dir / "journal.md"
 
-    summary_path.write_text(_summary_markdown(report), encoding="utf-8")
+    research = build_llm_research(report, disable_llm=disable_llm)
+    summary_md = research["summary_md"]
+    summary_path.write_text(summary_md, encoding="utf-8")
+    (report_dir / "report.md").write_text(summary_md, encoding="utf-8")
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    journal_path.write_text(_journal_markdown(report), encoding="utf-8")
+    insights_path.write_text(json.dumps(research, ensure_ascii=False, indent=2), encoding="utf-8")
+    journal_path.write_text(research["journal_md"], encoding="utf-8")
+    _write_delivery_bundle(report_dir, report, research, summary_md)
 
     should_update_memory = (cycle == "strategic") if update_memory is None else update_memory
     if should_update_memory:
@@ -583,10 +951,14 @@ def write_cycle_report(cycle: str, days: int | None = None, update_memory: bool 
         "cycle": cycle,
         "report_dir": str(report_dir),
         "summary_path": str(summary_path),
+        "report_md_path": str(report_dir / "report.md"),
+        "html_path": str(report_dir / "report.html"),
         "json_path": str(json_path),
+        "insights_path": str(insights_path),
         "journal_path": str(journal_path),
         "memory_path": str(RUNTIME_MEMORY_PATH) if should_update_memory else "",
         "report": report,
+        "research": research,
     }
 
 
@@ -637,8 +1009,8 @@ def send_cycle_report(report_info: dict) -> bool:
     return sent
 
 
-def run_cycle(cycle: str, days: int | None = None, send: bool = False, update_memory: bool | None = None) -> dict:
-    report_info = write_cycle_report(cycle, days=days, update_memory=update_memory)
+def run_cycle(cycle: str, days: int | None = None, send: bool = False, update_memory: bool | None = None, disable_llm: bool = False) -> dict:
+    report_info = write_cycle_report(cycle, days=days, update_memory=update_memory, disable_llm=disable_llm)
     print(f"🧭 Цикл {cycle}: {report_info['summary_path']}")
     if report_info.get("memory_path"):
         print(f"🧠 Memory updated: {report_info['memory_path']}")
@@ -654,6 +1026,7 @@ def main() -> None:
     parser.add_argument("--send", action="store_true")
     parser.add_argument("--update-memory", action="store_true")
     parser.add_argument("--no-memory-update", action="store_true")
+    parser.add_argument("--no-llm", action="store_true", help="build deterministic fallback report without LLM research")
     args = parser.parse_args()
 
     update_memory = None
@@ -661,7 +1034,7 @@ def main() -> None:
         update_memory = True
     if args.no_memory_update:
         update_memory = False
-    run_cycle(args.cycle, days=args.days, send=args.send, update_memory=update_memory)
+    run_cycle(args.cycle, days=args.days, send=args.send, update_memory=update_memory, disable_llm=args.no_llm)
 
 
 if __name__ == "__main__":

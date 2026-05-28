@@ -44,3 +44,27 @@ Periodic cycle reports are written under `reports/cycles/<cycle>-<timestamp>/`.
 - `journal.md` - method, observations, decisions and data gaps.
 
 Strategic cycles may append generated lessons to `memory/runtime_memory.md`; this runtime memory is ignored by git.
+
+## LLM Research Artifacts
+
+Cycle folders now contain both evidence and agent research:
+
+- `report.json` - deterministic evidence pack.
+- `insights.json` - structured LLM research output.
+- `summary.md` - LLM-written business research report.
+- `journal.md` - LLM-written research journal.
+
+## Delivery Bundle
+
+Cycle report folders also mirror the colleague project delivery bundle:
+
+- `report.md` and `report.html`
+- `advisories.json`
+- `causal_chains.json`
+- `confirmed_findings.json`
+- `rejected_hypotheses.json`
+- `data_requests.md` / `data_requests.json`
+- `task_candidates.json`
+- `system_improvement_proposals.json`
+- `methodology_proposals.md` / `methodology_proposals.json`
+- `external_context.json`, `context.json`, `delivery.json`

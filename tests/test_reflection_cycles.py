@@ -70,7 +70,7 @@ base = Path(path).with_suffix("")
 reflection_cycles.REPORTS_DIR = base / "reports"
 reflection_cycles.RUNTIME_MEMORY_PATH = base / "memory" / "runtime_memory.md"
 
-weekly = reflection_cycles.write_cycle_report("weekly", days=7, update_memory=False)
+weekly = reflection_cycles.write_cycle_report("weekly", days=7, update_memory=False, disable_llm=True)
 weekly_json = Path(weekly["json_path"])
 weekly_data = json.loads(weekly_json.read_text())
 assert weekly_data["cycle"] == "weekly"
@@ -78,9 +78,17 @@ assert weekly_data["scope"]["sent_news"] == 6
 assert weekly_data["meta_insights"]
 assert weekly_data["feedback_adjustments"]
 assert Path(weekly["summary_path"]).exists()
+assert Path(weekly["report_md_path"]).exists()
+assert Path(weekly["html_path"]).exists()
+assert (Path(weekly["report_dir"]) / "advisories.json").exists()
+assert (Path(weekly["report_dir"]) / "causal_chains.json").exists()
+assert (Path(weekly["report_dir"]) / "data_requests.md").exists()
 assert Path(weekly["journal_path"]).exists()
+assert Path(weekly["insights_path"]).exists()
+weekly_research = json.loads(Path(weekly["insights_path"]).read_text())
+assert weekly_research["research_mode"] == "fallback"
 
-strategic = reflection_cycles.write_cycle_report("strategic", days=30, update_memory=True)
+strategic = reflection_cycles.write_cycle_report("strategic", days=30, update_memory=True, disable_llm=True)
 strategic_data = json.loads(Path(strategic["json_path"]).read_text())
 assert strategic_data["strategic_patterns"]
 assert reflection_cycles.RUNTIME_MEMORY_PATH.exists()
