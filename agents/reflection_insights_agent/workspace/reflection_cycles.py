@@ -1288,7 +1288,7 @@ def _telegram_message(report_info: dict) -> str:
         for item in gaps[:2]:
             lines.append(f"• {escape(_clip_text(_item_title(item), 260))}")
 
-    lines.extend(["", "📎 Полный <b>report.md</b> прикреплён следующим сообщением."])
+    lines.extend(["", "📎 Полный файл отчёта прикреплён следующим сообщением."])
     return "\n".join(lines)[:3200]
 
 
