@@ -7,9 +7,15 @@
       "name": "Агент отбора релевантности",
       "type": "llm_agent",
       "role": "Оценивает новости для каждого ГОСБа через LLM V2 с учетом региона, источников, холдингов и банковских метрик.",
-      "implementation": "src/agent_news/llm_filter_v2.py",
-      "inputs": ["raw_news", "config/holdings.txt", "knowledge_documents"],
-      "outputs": ["filtered_news"],
+      "implementation": "agents/relevance_filter_v2/workspace/llm_filter_v2.py",
+      "inputs": [
+        "raw_news",
+        "config/holdings.txt",
+        "knowledge_documents"
+      ],
+      "outputs": [
+        "filtered_news"
+      ],
       "prompt_source": "llm_filter_v2._build_prompt",
       "enabled": true
     },
@@ -18,9 +24,17 @@
       "name": "Агент управленческой рефлексии",
       "type": "llm_agent",
       "role": "Формирует рекомендации и инсайты по отправленным новостям, метрикам, комментариям и базе знаний.",
-      "implementation": "src/agent_news/insights.py",
-      "inputs": ["sent_news", "feedback", "knowledge_documents", "metrics"],
-      "outputs": ["insights", "telegram_insight_messages"],
+      "implementation": "agents/reflection_insights_agent/workspace/insights.py",
+      "inputs": [
+        "sent_news",
+        "feedback",
+        "knowledge_documents",
+        "metrics"
+      ],
+      "outputs": [
+        "insights",
+        "telegram_insight_messages"
+      ],
       "prompt_source": "insights._build_prompt",
       "enabled": true
     }

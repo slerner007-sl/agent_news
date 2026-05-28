@@ -37,4 +37,4 @@ Reject geography-only noise, entertainment, sports, weather, generic city life, 
 
 ## Implementation
 
-Runtime implementation lives in `/home/user1/gosb_bot/src/agent_news/llm_filter_v2.py`.
+Runtime implementation lives in `/home/user1/gosb_bot/agents/relevance_filter_v2/workspace/llm_filter_v2.py`; `/home/user1/gosb_bot/src/agent_news/llm_filter_v2.py` is a compatibility wrapper.

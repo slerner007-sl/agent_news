@@ -2,7 +2,7 @@
 
 ## Files
 
-- `/home/user1/gosb_bot/src/agent_news/insights.py` - insight generation and sending logic.
+- `/home/user1/gosb_bot/agents/reflection_insights_agent/workspace/insights.py` - insight generation and sending logic.
 - `/home/user1/gosb_bot/data/news_bot.db` - sent news, feedback, insights and knowledge documents.
 - `/home/user1/gosb_bot/plugins/openclaw-feedback` - feedback handling for insight reactions/comments.
 
@@ -10,7 +10,7 @@
 
 ```bash
 cd /home/user1/gosb_bot
-PYTHONPATH=/home/user1/gosb_bot/src python3 -m py_compile src/agent_news/insights.py
+PYTHONPATH=/home/user1/gosb_bot/src python3 -m py_compile agents/reflection_insights_agent/workspace/insights.py src/agent_news/insights.py
 python3 tests/test_insights.py
 ```
 

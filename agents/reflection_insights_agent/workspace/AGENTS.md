@@ -25,18 +25,19 @@ Analyze sent news, expert reactions, comments, metrics, methodology, and knowled
 - suggested action;
 - owner hint;
 - evidence;
-- metric links when supportable.
+- metric links for every insight when supportable by the metrics context.
 
 ## Quality Bar
 
 Produce only defensible recommendations:
 
 - tie the recommendation to specific news evidence;
-- connect to metrics only when the link is explainable;
+- first try to connect each management insight to a known business metric from the loaded metrics context or from V2 news metric links;
+- use the nearest relevant business metric when the relationship can be explained, and leave metric links empty only when no defensible link exists;
 - avoid generic advice;
 - prefer practical next steps for a GOSB manager;
 - say when evidence is weak instead of overstating.
 
 ## Implementation
 
-Runtime implementation lives in `/home/user1/gosb_bot/src/agent_news/insights.py`.
+Runtime implementation lives in `/home/user1/gosb_bot/agents/reflection_insights_agent/workspace/insights.py`; `/home/user1/gosb_bot/src/agent_news/insights.py` is a compatibility wrapper.
