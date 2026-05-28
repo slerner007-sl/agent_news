@@ -17,7 +17,7 @@ export default definePluginEntry({
   register(api) {
     const pluginConfig = api.pluginConfig ?? {};
 
-    for (const namespace of ["useful", "boring", "comment"]) {
+    for (const namespace of ["useful", "boring", "comment", "iuseful", "iboring", "icomment", "insight_useful", "insight_boring", "insight_comment"]) {
       api.registerInteractiveHandler({
         channel: "telegram",
         namespace,
