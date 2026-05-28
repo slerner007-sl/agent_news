@@ -1,60 +1,38 @@
-# Example host-level nginx vhost for the Agent News dashboard.
-# Drop this file at /etc/nginx/sites-available/agent-news-web, adapt the
-# server_name / TLS paths, and link it into sites-enabled.
+# Host-level nginx vhost for the Agent News (AI Visor) dashboard.
+# Drop at /etc/nginx/sites-available/agent-news-web and symlink into sites-enabled.
 #
-# The static SPA is served from the agent-news-web-ui container on
-# 127.0.0.1:8080. The API lives on 127.0.0.1:8765. Both are bound to
-# loopback in docker-compose.yml so they're never exposed directly.
+# Current production layout (no Docker):
+#   Static SPA  →  /var/www/agent-news-web  (built via: cd web && npm run build)
+#   FastAPI     →  127.0.0.1:8765           (systemd: agent-news-web-api.service)
+#
+# Basic auth protects the entire site. Generate credentials:
+#   sudo htpasswd -c /etc/nginx/agent-news.htpasswd <username>
 
-upstream agent_news_web_ui  { server 127.0.0.1:8080; }
 upstream agent_news_web_api { server 127.0.0.1:8765; }
 
-# Redirect HTTP -> HTTPS (after you've issued a cert with certbot).
 server {
     listen 80;
     listen [::]:80;
-    server_name radar.example.com;
+    server_name _;
 
-    location /.well-known/acme-challenge/ {
-        root /var/www/letsencrypt;
-    }
-
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name radar.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/radar.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/radar.example.com/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    # Basic auth gate. Generate the file with:
-    #   sudo htpasswd -c /etc/nginx/agent-news.htpasswd radar
-    auth_basic           "Agent News";
+    auth_basic           "AI Visor";
     auth_basic_user_file /etc/nginx/agent-news.htpasswd;
 
-    # SPA — static files
+    # Static SPA files
+    root /var/www/agent-news-web;
+    index index.html;
+
     location / {
-        proxy_pass http://agent_news_web_ui;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        try_files $uri $uri/ /index.html;
     }
 
-    # API
+    # API proxy
     location /api/ {
         proxy_pass http://agent_news_web_api;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;  # chat with agent can take up to 4 min
+        proxy_read_timeout 300s;
     }
 
     # SSE event stream — disable buffering for real-time delivery
@@ -62,8 +40,6 @@ server {
         proxy_pass http://agent_news_web_api;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 3600s;
@@ -72,14 +48,13 @@ server {
     }
 
     location = /health {
+        auth_basic off;
         proxy_pass http://agent_news_web_api;
         proxy_set_header Host $host;
         access_log off;
-        auth_basic off; # let monitoring hit /health without creds
     }
 
-    # Sensible defaults
-    client_max_body_size 12m;  # allow knowledge file uploads up to 10MB + overhead
+    client_max_body_size 12m;
     gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/javascript application/xml+rss;
+    gzip_types text/plain text/css application/json application/javascript text/javascript;
 }
