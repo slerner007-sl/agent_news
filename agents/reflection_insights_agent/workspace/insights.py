@@ -51,6 +51,7 @@ INSIGHTS_THREAD_ID = os.getenv("INSIGHTS_THREAD_ID", "").strip()
 INSIGHTS_THREAD_IDS = os.getenv("INSIGHTS_THREAD_IDS", "").strip()
 INSIGHTS_CHAT_ID = os.getenv("INSIGHTS_CHAT_ID", "").strip()
 REPORTS_DIR = Path(os.getenv("INSIGHT_REPORTS_DIR", _REPO_ROOT / "agents/reflection_insights_agent/workspace/reports"))
+DAILY_CONTEXT_DAYS = int(os.getenv("INSIGHT_DAILY_CONTEXT_DAYS", "7"))
 
 
 def _chunked(items: list[dict], size: int) -> Iterable[list[dict]]:
@@ -670,6 +671,77 @@ def write_reflection_report(run_id: str) -> dict:
         "insights_count": len(report["insights"]),
     }
 
+
+def _recent_context_for_gosb(gosb_id: int, run_id: str, days: int = DAILY_CONTEXT_DAYS) -> str:
+    modifier = f"-{max(1, int(days or 1))} days"
+    with get_conn() as conn:
+        prior_insights = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT title, insight_type, priority, confidence, created_at
+                FROM insights
+                WHERE gosb_id = ?
+                  AND COALESCE(run_id, '') != COALESCE(?, '')
+                  AND created_at >= datetime('now', ?)
+                ORDER BY created_at DESC
+                LIMIT 12
+                """,
+                (gosb_id, run_id, modifier),
+            ).fetchall()
+        ]
+        category_rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT COALESCE(nc.category, 'unknown') AS category, COUNT(*) AS c
+                FROM sent_news s
+                LEFT JOIN news_classification nc
+                    ON nc.gosb_id = s.gosb_id
+                   AND nc.news_id = s.news_id
+                   AND nc.mode = 'live'
+                WHERE s.gosb_id = ?
+                  AND COALESCE(s.run_id, '') != COALESCE(?, '')
+                  AND s.sent_at >= datetime('now', ?)
+                GROUP BY COALESCE(nc.category, 'unknown')
+                ORDER BY c DESC
+                LIMIT 8
+                """,
+                (gosb_id, run_id, modifier),
+            ).fetchall()
+        ]
+        feedback_rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT f.action, COUNT(*) AS c
+                FROM sent_news s
+                JOIN feedback f
+                    ON f.news_id = s.news_id
+                   AND (f.gosb_id IS NULL OR f.gosb_id = s.gosb_id)
+                WHERE s.gosb_id = ?
+                  AND COALESCE(s.run_id, '') != COALESCE(?, '')
+                  AND f.created_at >= datetime('now', ?)
+                GROUP BY f.action
+                ORDER BY c DESC
+                """,
+                (gosb_id, run_id, modifier),
+            ).fetchall()
+        ]
+
+    parts: list[str] = []
+    if category_rows:
+        parts.append("Категории прошлых дней: " + "; ".join(f"{row['category']}={row['c']}" for row in category_rows))
+    if feedback_rows:
+        parts.append("Фидбек прошлых дней: " + "; ".join(f"{row['action']}={row['c']}" for row in feedback_rows))
+    if prior_insights:
+        lines = [
+            f"- {row['priority']}/{row['insight_type']}: {row['title']} (confidence {float(row['confidence'] or 0):.2f})"
+            for row in prior_insights
+        ]
+        parts.append("Недавние инсайты:\n" + "\n".join(lines))
+    return "\n".join(parts)
+
 def get_sent_news_for_run(gosb_id: int, run_id: str) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute("""
@@ -709,7 +781,7 @@ def _metric_links_for_news(gosb_id: int, news_id: int) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _build_prompt(gosb: dict, batch: list[dict]) -> str:
+def _build_prompt(gosb: dict, batch: list[dict], recent_context: str = "") -> str:
     news_list = "\n\n".join(
         (
             f"[{idx}] id={news['id']}\n"
@@ -734,6 +806,9 @@ def _build_prompt(gosb: dict, batch: list[dict]) -> str:
 
 Регион ГОСБа: {gosb.get('region') or '-'}.
 Закрепленные клиентские холдинги: {holdings_display_for_gosb(gosb['name'])}.
+
+Контекст прошлых дней для поиска повторов и трендов, не для механического копирования:
+{recent_context or '-'}
 
 Метрики из темы метрик:
 {get_knowledge_context("metrics", limit=10, max_chars=3200)}
@@ -808,11 +883,11 @@ def _fallback_insights(gosb: dict, batch: list[dict], reason: str) -> list[dict]
     return insights
 
 
-def classify_insight_batch(gosb: dict, batch: list[dict], disable_llm: bool = False) -> tuple[list[dict], dict]:
+def classify_insight_batch(gosb: dict, batch: list[dict], disable_llm: bool = False, recent_context: str = "") -> tuple[list[dict], dict]:
     if disable_llm:
         return _fallback_insights(gosb, batch, "insight_llm_disabled"), {"source": "rules"}
 
-    prompt = _build_prompt(gosb, batch)
+    prompt = _build_prompt(gosb, batch, recent_context=recent_context)
     try:
         raw = _openclaw_json(prompt)
         raw_items = raw.get("insights", [])
@@ -867,12 +942,13 @@ def generate_insights(
         for news in news_items:
             news["_metric_links"] = _metric_links_for_news(gosb["id"], news["id"])
 
+        recent_context = _recent_context_for_gosb(gosb["id"], run_id)
         print(f"📍 {gosb['name']}: новостей для рефлексии {len(news_items)}")
         seen: set[str] = set()
         saved_for_gosb = 0
 
         for batch in _chunked(news_items, batch_size):
-            raw_items, raw_response = classify_insight_batch(gosb, batch, disable_llm=disable_llm)
+            raw_items, raw_response = classify_insight_batch(gosb, batch, disable_llm=disable_llm, recent_context=recent_context)
             normalized = []
             for raw in raw_items:
                 item = normalize_insight(raw, batch)

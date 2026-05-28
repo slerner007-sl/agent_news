@@ -34,3 +34,13 @@ The report JSON contains:
 - `not_promoted_to_insight[]`
 
 Reports must not contain secrets, tokens or private transport credentials.
+
+## Cycle Reports
+
+Periodic cycle reports are written under `reports/cycles/<cycle>-<timestamp>/`.
+
+- `summary.md` - human-readable report to send/review.
+- `report.json` - machine-readable meta-insights, feedback adjustments and strategic patterns.
+- `journal.md` - method, observations, decisions and data gaps.
+
+Strategic cycles may append generated lessons to `memory/runtime_memory.md`; this runtime memory is ignored by git.

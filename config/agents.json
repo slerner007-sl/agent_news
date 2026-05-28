@@ -23,7 +23,7 @@
       "id": "reflection_insights_agent",
       "name": "Агент управленческой рефлексии",
       "type": "llm_agent",
-      "role": "Формирует рекомендации и инсайты по отправленным новостям, метрикам, комментариям и базе знаний.",
+      "role": "Формирует рекомендации, ежедневные отчеты, еженедельные мета-инсайты и стратегические паттерны по отправленным новостям, метрикам, комментариям и базе знаний.",
       "implementation": "agents/reflection_insights_agent/workspace/insights.py",
       "inputs": [
         "sent_news",
@@ -33,10 +33,14 @@
       ],
       "outputs": [
         "insights",
-        "telegram_insight_messages"
+        "telegram_insight_messages",
+        "reflection_reports",
+        "weekly_meta_insights",
+        "strategic_memory_updates"
       ],
-      "prompt_source": "insights._build_prompt",
-      "enabled": true
+      "prompt_source": "insights._build_prompt + reflection_cycles.build_cycle_report",
+      "enabled": true,
+      "cycle_implementation": "agents/reflection_insights_agent/workspace/reflection_cycles.py"
     }
   ]
 }

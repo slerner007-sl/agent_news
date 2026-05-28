@@ -26,7 +26,9 @@ Analyze sent news, expert reactions, comments, metrics, methodology, and knowled
 - owner hint;
 - evidence;
 - metric links for every insight when supportable by the metrics context;
-- per-run research report: `reports/<run-id>/summary.md`, `insights.json`, `journal.md`.
+- per-run research report: `reports/<run-id>/summary.md`, `insights.json`, `journal.md`;
+- weekly meta-insights from insights, feedback and trends;
+- strategic/monthly pattern reports and runtime memory updates.
 
 ## Quality Bar
 

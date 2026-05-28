@@ -35,3 +35,23 @@ Use this structure in `journal.md`:
 - Metric check
 - Interpretation
 - Decision
+
+## Reflection Cycles
+
+### Cycle 1: Daily
+
+- Input: today's sent news plus recent context from previous days.
+- Output: action insights and per-run report artifacts.
+- Purpose: avoid treating repeated signals as isolated events.
+
+### Cycle 2: Weekly
+
+- Input: week of insights, feedback, news categories and metric links.
+- Output: meta-insights, trend candidates and feedback-based priority adjustments.
+- Example: five similar news items in one week become a trend hypothesis.
+
+### Cycle 3: Strategic
+
+- Input: month-scale news, insights, metric links and feedback.
+- Output: hidden patterns, recurring dependencies, data gaps and runtime memory updates.
+- Strategy changes remain proposals until reviewed.
