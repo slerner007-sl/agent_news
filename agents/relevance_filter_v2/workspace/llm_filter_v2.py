@@ -19,7 +19,7 @@ import argparse
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 from agent_news.db import (
@@ -39,6 +39,16 @@ BATCH_SIZE = int(os.getenv("NEWS_V2_BATCH_SIZE", "20"))
 MAX_ITEMS = int(os.getenv("NEWS_V2_MAX_ITEMS", "0"))
 MIN_CONFIDENCE = float(os.getenv("NEWS_V2_MIN_CONFIDENCE", "0.65"))
 DIGEST_LIMIT = int(os.getenv("NEWS_V2_DIGEST_LIMIT", "0"))
+FEEDBACK_LOOKBACK_DAYS = int(os.getenv("NEWS_V2_FEEDBACK_LOOKBACK_DAYS", "30"))
+FEEDBACK_MIN_SIGNALS = int(os.getenv("NEWS_V2_FEEDBACK_MIN_SIGNALS", "3"))
+FEEDBACK_BORING_RATIO = float(os.getenv("NEWS_V2_FEEDBACK_BORING_RATIO", "0.60"))
+FEEDBACK_USEFUL_RATIO = float(os.getenv("NEWS_V2_FEEDBACK_USEFUL_RATIO", "0.67"))
+FEEDBACK_LOCAL_BORING_PENALTY = int(os.getenv("NEWS_V2_FEEDBACK_LOCAL_BORING_PENALTY", "9"))
+FEEDBACK_GLOBAL_BORING_PENALTY = int(os.getenv("NEWS_V2_FEEDBACK_GLOBAL_BORING_PENALTY", "6"))
+FEEDBACK_USEFUL_BOOST = int(os.getenv("NEWS_V2_FEEDBACK_USEFUL_BOOST", "4"))
+FEEDBACK_MIN_ADJUSTED_SCORE = int(os.getenv("NEWS_V2_FEEDBACK_MIN_ADJUSTED_SCORE", "4"))
+FEEDBACK_STRICT_SKIP = os.getenv("NEWS_V2_FEEDBACK_STRICT_SKIP", "1").strip().lower() in {"1", "true", "yes", "on"}
+FEEDBACK_MAX_CONTEXT_CATEGORIES = int(os.getenv("NEWS_V2_FEEDBACK_MAX_CONTEXT_CATEGORIES", "6"))
 
 DEFAULT_REGION_TERMS = (
     "самара",
@@ -83,6 +93,97 @@ STRONG_TERMS = (
     "недвиж",
     "экспорт",
     "импортозамещ",
+)
+
+BANKING_TERMS = (
+    "сбер",
+    "сбербанк",
+    "банк",
+    "банковск",
+    "кредит",
+    "ипотек",
+    "вклад",
+    "депозит",
+    "карта",
+    "платеж",
+    "перевод",
+)
+
+FRAUD_TERMS = (
+    "мошеннич",
+    "афер",
+    "кибер",
+    "фишинг",
+    "хищен",
+    "нелегальн",
+)
+
+REGULATION_TERMS = (
+    "цб",
+    "ключев",
+    "ставк",
+    "регулирован",
+    "налог",
+    "закон",
+    "постановлен",
+    "провер",
+)
+
+BUSINESS_TERMS = (
+    "бизнес",
+    "инвест",
+    "производств",
+    "завод",
+    "промышлен",
+    "мсп",
+    "застрой",
+    "недвиж",
+    "экспорт",
+    "импортозамещ",
+    "холдинг",
+    "предприят",
+    "партнерств",
+)
+
+LPR_TERMS = (
+    "губернатор",
+    "министр",
+    "правительств",
+    "администрац",
+    "глава",
+    "депутат",
+    "мэр",
+    "комисси",
+)
+
+CONCRETE_SIGNAL_TERMS = (
+    "клиент",
+    "контракт",
+    "сделк",
+    "кредит",
+    "заем",
+    "финансирован",
+    "банкрот",
+    "арбитраж",
+    "суд",
+    "иск",
+    "долг",
+    "провер",
+    "штраф",
+    "налог",
+    "риск",
+    "инвест",
+    "строительств",
+    "производств",
+    "завод",
+    "мощност",
+    "экспорт",
+    "руб",
+    "млн",
+    "млрд",
+    "ооо",
+    "пао",
+    "ао ",
 )
 
 
@@ -228,6 +329,54 @@ class RuleSignal:
     obvious_noise: bool
 
 
+@dataclass
+class FeedbackCategoryStats:
+    category: str
+    gosb_id: int | None = None
+    useful: int = 0
+    boring: int = 0
+    comments: int = 0
+    examples: list[str] = field(default_factory=list)
+
+    @property
+    def signal_total(self) -> int:
+        return self.useful + self.boring
+
+    @property
+    def boring_ratio(self) -> float:
+        return self.boring / self.signal_total if self.signal_total else 0.0
+
+    @property
+    def useful_ratio(self) -> float:
+        return self.useful / self.signal_total if self.signal_total else 0.0
+
+    def add(self, action: str, title: str) -> None:
+        if action == "useful":
+            self.useful += 1
+        elif action == "boring":
+            self.boring += 1
+        elif action == "comment":
+            self.comments += 1
+        if title and len(self.examples) < 3 and action in {"useful", "boring"}:
+            compact = " ".join(title.split())[:140]
+            self.examples.append(f"{action}: {compact}")
+
+
+@dataclass
+class FeedbackPolicy:
+    local: dict[int, dict[str, FeedbackCategoryStats]] = field(default_factory=dict)
+    global_by_category: dict[str, FeedbackCategoryStats] = field(default_factory=dict)
+    recent_lines: list[str] = field(default_factory=list)
+
+    def local_stats(self, gosb_id: int | None, category: str) -> FeedbackCategoryStats | None:
+        if gosb_id is None:
+            return None
+        return self.local.get(int(gosb_id), {}).get(category)
+
+    def global_stats(self, category: str) -> FeedbackCategoryStats | None:
+        return self.global_by_category.get(category)
+
+
 def _text(news: dict) -> str:
     return f"{news.get('title') or ''}\n{news.get('body') or ''}\n{news.get('source') or ''}".lower()
 
@@ -281,6 +430,270 @@ def _hit_terms(text: str, terms: Iterable[str]) -> list[str]:
     return [term for term in terms if term in text]
 
 
+def _canonical_category(value: str | None) -> str:
+    value = str(value or "").strip()
+    return value if value in CATEGORIES else "other"
+
+
+def _infer_category_from_text(text: str, hits: Iterable[str] = ()) -> str:
+    hit_list = [str(hit) for hit in hits]
+    if any(hit.startswith("holding:") for hit in hit_list):
+        return "client_holding"
+    if _hit_terms(text, FRAUD_TERMS):
+        return "fraud"
+    if _hit_terms(text, REGULATION_TERMS):
+        return "regulation"
+    if _hit_terms(text, BANKING_TERMS):
+        return "banking"
+    if _hit_terms(text, BUSINESS_TERMS):
+        return "business"
+    if _hit_terms(text, LPR_TERMS):
+        return "lpr"
+    if _hit_terms(text, STRONG_TERMS):
+        return "regional_economy"
+    return "other"
+
+
+def _category_prior(news: dict, hits: Iterable[str] = ()) -> str:
+    return _infer_category_from_text(_text(news), hits)
+
+
+def _is_concrete_signal(news: dict, hits: Iterable[str] = ()) -> bool:
+    text = _text(news)
+    hit_list = [str(hit) for hit in hits]
+    if any(hit.startswith("holding:") for hit in hit_list):
+        return True
+    if len(_hit_terms(text, CONCRETE_SIGNAL_TERMS)) >= 2:
+        return True
+    if re.search(r"\b\d+(?:[,.]\d+)?\s*(?:млрд|млн|тыс|%|процент|руб)", text):
+        return True
+    if re.search(r"\b(?:инн|огрн)\s*\d{8,}", text):
+        return True
+    return False
+
+
+def _load_feedback_policy(lookback_days: int = FEEDBACK_LOOKBACK_DAYS) -> FeedbackPolicy:
+    policy = FeedbackPolicy()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                f.action,
+                COALESCE(f.comment, '') AS comment,
+                r.title,
+                r.body,
+                COALESCE(
+                    f.gosb_id,
+                    (
+                        SELECT s.gosb_id
+                        FROM sent_news s
+                        WHERE s.news_id = f.news_id
+                        ORDER BY datetime(s.sent_at) DESC
+                        LIMIT 1
+                    ),
+                    (
+                        SELECT nc.gosb_id
+                        FROM news_classification nc
+                        WHERE nc.news_id = f.news_id
+                        ORDER BY datetime(nc.created_at) DESC
+                        LIMIT 1
+                    )
+                ) AS gosb_id,
+                COALESCE(
+                    (
+                        SELECT nc.category
+                        FROM news_classification nc
+                        WHERE nc.news_id = f.news_id
+                          AND (f.gosb_id IS NULL OR nc.gosb_id = f.gosb_id)
+                        ORDER BY
+                          CASE nc.mode
+                            WHEN 'live' THEN 0
+                            WHEN 'shadow' THEN 1
+                            WHEN 'dry-run' THEN 2
+                            ELSE 3
+                          END,
+                          datetime(nc.created_at) DESC
+                        LIMIT 1
+                    ),
+                    ''
+                ) AS category,
+                f.created_at
+            FROM feedback f
+            LEFT JOIN raw_news r ON r.id = f.news_id
+            WHERE f.created_at >= datetime('now', ? || ' days')
+              AND f.action IN ('useful', 'boring', 'comment')
+            ORDER BY datetime(f.created_at) DESC
+            LIMIT 500
+            """,
+            (f"-{lookback_days}",),
+        ).fetchall()
+
+    for row in rows:
+        action = str(row["action"] or "").strip()
+        title = str(row["title"] or "Без заголовка")
+        text = f"{title}\n{row['body'] or ''}".lower()
+        category = _canonical_category(row["category"]) if row["category"] else _infer_category_from_text(text)
+        gosb_id = row["gosb_id"]
+        gosb_id = int(gosb_id) if gosb_id is not None else None
+
+        global_stats = policy.global_by_category.setdefault(
+            category,
+            FeedbackCategoryStats(category=category),
+        )
+        global_stats.add(action, title)
+
+        if gosb_id is not None:
+            local_bucket = policy.local.setdefault(gosb_id, {})
+            local_stats = local_bucket.setdefault(
+                category,
+                FeedbackCategoryStats(category=category, gosb_id=gosb_id),
+            )
+            local_stats.add(action, title)
+
+        if len(policy.recent_lines) < 12:
+            comment = str(row["comment"] or "").strip()
+            suffix = f" Комментарий: {comment[:100]}" if comment else ""
+            scope = f"gosb_id={gosb_id}" if gosb_id is not None else "global"
+            policy.recent_lines.append(f"- {action}; {scope}; {category}: {title[:150]}.{suffix}")
+
+    return policy
+
+
+def _stats_pressure(stats: FeedbackCategoryStats | None) -> str | None:
+    if not stats or stats.signal_total < FEEDBACK_MIN_SIGNALS:
+        return None
+    if stats.boring_ratio >= FEEDBACK_BORING_RATIO:
+        return "boring"
+    if stats.useful_ratio >= FEEDBACK_USEFUL_RATIO:
+        return "useful"
+    return None
+
+
+def _feedback_prior(news: dict, gosb: dict | None, policy: FeedbackPolicy, hits: Iterable[str]) -> dict:
+    category = _category_prior(news, hits)
+    concrete = _is_concrete_signal(news, hits)
+    gosb_id = (gosb or {}).get("id")
+    local = policy.local_stats(int(gosb_id), category) if gosb_id is not None else None
+    global_stats = policy.global_stats(category)
+    local_pressure = _stats_pressure(local)
+    global_pressure = _stats_pressure(global_stats)
+
+    score_delta = 0
+    source = "none"
+    reason = "нет достаточного фидбека по этой категории"
+    should_skip = False
+
+    if local_pressure == "boring":
+        score_delta -= FEEDBACK_LOCAL_BORING_PENALTY
+        source = "local_boring"
+        reason = (
+            f"локальный boring feedback по {category}: "
+            f"{local.boring}/{local.signal_total}"
+        )
+    elif global_pressure == "boring":
+        score_delta -= FEEDBACK_GLOBAL_BORING_PENALTY
+        source = "global_boring"
+        reason = (
+            f"глобальный boring feedback по {category}: "
+            f"{global_stats.boring}/{global_stats.signal_total}"
+        )
+    elif local_pressure == "useful":
+        score_delta += FEEDBACK_USEFUL_BOOST
+        source = "local_useful"
+        reason = (
+            f"локальный useful feedback по {category}: "
+            f"{local.useful}/{local.signal_total}"
+        )
+    elif global_pressure == "useful":
+        score_delta += max(1, FEEDBACK_USEFUL_BOOST // 2)
+        source = "global_useful"
+        reason = (
+            f"глобальный useful feedback по {category}: "
+            f"{global_stats.useful}/{global_stats.signal_total}"
+        )
+
+    adjusted_score = int(news.get("_rule_score") or 0) + score_delta
+    if (
+        FEEDBACK_STRICT_SKIP
+        and source.endswith("_boring")
+        and (not concrete or adjusted_score <= FEEDBACK_MIN_ADJUSTED_SCORE)
+        and category not in {"client_holding", "fraud"}
+    ):
+        should_skip = True
+
+    return {
+        "category": category,
+        "source": source,
+        "score_delta": score_delta,
+        "concrete": concrete,
+        "reason": reason,
+        "skip": should_skip,
+        "skip_reason": f"feedback_policy:{source}:{category}",
+    }
+
+
+def _format_stats(stats: FeedbackCategoryStats) -> str:
+    return (
+        f"{stats.category}: useful={stats.useful}, boring={stats.boring}, "
+        f"comments={stats.comments}, boring_ratio={stats.boring_ratio:.0%}"
+    )
+
+
+def _feedback_policy_summary(policy: FeedbackPolicy, gosb: dict | None = None) -> str:
+    lines: list[str] = []
+    gosb_id = (gosb or {}).get("id")
+    if gosb_id is not None:
+        local_stats = [
+            stats
+            for stats in policy.local.get(int(gosb_id), {}).values()
+            if stats.signal_total >= FEEDBACK_MIN_SIGNALS
+        ]
+        local_stats.sort(key=lambda item: (item.boring_ratio, item.signal_total), reverse=True)
+        if local_stats:
+            lines.append("Локальная политика для этого ГОСБ:")
+            for stats in local_stats[:FEEDBACK_MAX_CONTEXT_CATEGORIES]:
+                pressure = _stats_pressure(stats)
+                if pressure == "boring":
+                    action = "снижать без конкретной привязки"
+                elif pressure == "useful":
+                    action = "можно повышать"
+                else:
+                    action = "наблюдать без автоизменения"
+                lines.append(f"- {_format_stats(stats)} -> {action}")
+
+    global_stats = [
+        stats
+        for stats in policy.global_by_category.values()
+        if stats.signal_total >= FEEDBACK_MIN_SIGNALS
+    ]
+    global_stats.sort(key=lambda item: (item.boring_ratio, item.signal_total), reverse=True)
+    if global_stats:
+        lines.append("Глобальная политика по всем ГОСБ:")
+        for stats in global_stats[:FEEDBACK_MAX_CONTEXT_CATEGORIES]:
+            pressure = _stats_pressure(stats)
+            if pressure == "boring":
+                action = "снижать похожие новости в других регионах"
+            elif pressure == "useful":
+                action = "можно использовать как положительный паттерн"
+            else:
+                action = "наблюдать без автоизменения"
+            lines.append(f"- {_format_stats(stats)} -> {action}")
+
+    if policy.recent_lines:
+        lines.append("Последние реакции:")
+        lines.extend(policy.recent_lines[:8])
+
+    if not lines:
+        return "Пока нет достаточной пользовательской обратной связи."
+
+    lines.append(
+        "Правило применения: если категория имеет boring pressure, пропускай только новости "
+        "с конкретной привязкой к клиенту, сумме, метрике, риску, сделке, суду, производству "
+        "или регуляторному действию; общие региональные/пиар/назначенческие новости отклоняй."
+    )
+    return "\n".join(lines)
+
+
 def _source_owner_hits(source: str, gosb: dict | None) -> tuple[list[str], list[str]]:
     source = (source or "").lower()
     gosb_name = str((gosb or {}).get("name") or "")
@@ -332,15 +745,25 @@ def prepare_candidates(
     news_items: list[dict],
     gosb: dict | None = None,
     max_items: int = MAX_ITEMS,
+    feedback_policy: FeedbackPolicy | None = None,
 ) -> tuple[list[dict], list[dict]]:
     candidates = []
     skipped = []
+    policy = feedback_policy or _load_feedback_policy()
 
     for news in news_items:
         signal = score_news(news, gosb)
         enriched = dict(news)
+        enriched["_rule_score_raw"] = signal.score
         enriched["_rule_score"] = signal.score
         enriched["_rule_hits"] = signal.hits
+        feedback = _feedback_prior(enriched, gosb, policy, signal.hits)
+        enriched["_category_prior"] = feedback["category"]
+        enriched["_feedback_policy"] = feedback["source"]
+        enriched["_feedback_reason"] = feedback["reason"]
+        enriched["_feedback_score_delta"] = feedback["score_delta"]
+        enriched["_feedback_concrete"] = feedback["concrete"]
+        enriched["_rule_score"] = signal.score + int(feedback["score_delta"])
 
         body = (news.get("body") or "").strip()
         title = (news.get("title") or "").strip()
@@ -351,6 +774,11 @@ def prepare_candidates(
 
         if signal.obvious_noise:
             enriched["_skip_reason"] = "obvious_noise"
+            skipped.append(enriched)
+            continue
+
+        if feedback["skip"]:
+            enriched["_skip_reason"] = feedback["skip_reason"]
             skipped.append(enriched)
             continue
 
@@ -367,26 +795,8 @@ def _chunked(items: list[dict], size: int) -> Iterable[list[dict]]:
         yield items[start:start + size]
 
 
-def _load_feedback_context(limit: int = 10) -> str:
-    with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT f.action, COALESCE(f.comment, '') AS comment, r.title
-            FROM feedback f
-            LEFT JOIN raw_news r ON r.id = f.news_id
-            ORDER BY f.created_at DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
-
-    if not rows:
-        return "Пока нет пользовательской обратной связи."
-
-    lines = []
-    for row in rows:
-        title = (row["title"] or "Без заголовка")[:180]
-        comment = (row["comment"] or "").strip()
-        suffix = f" Комментарий: {comment[:120]}" if comment else ""
-        lines.append(f"- {row['action']}: {title}.{suffix}")
-    return "\n".join(lines)
+def _load_feedback_context(gosb: dict | None = None) -> str:
+    return _feedback_policy_summary(_load_feedback_policy(), gosb)
 
 
 def _build_prompt(gosb: dict, batch: list[dict]) -> str:
@@ -395,7 +805,14 @@ def _build_prompt(gosb: dict, batch: list[dict]) -> str:
             f"[{idx}] id={news['id']}\n"
             f"Заголовок: {news.get('title') or '-'}\n"
             f"Источник: {news.get('source') or '-'}\n"
-            f"Rule score: {news.get('_rule_score', 0)}; hits: {', '.join(news.get('_rule_hits') or []) or '-'}\n"
+            f"Rule score: {news.get('_rule_score', 0)}"
+            f" (raw={news.get('_rule_score_raw', news.get('_rule_score', 0))}, "
+            f"feedback_delta={news.get('_feedback_score_delta', 0)}); "
+            f"hits: {', '.join(news.get('_rule_hits') or []) or '-'}\n"
+            f"Category prior: {news.get('_category_prior') or '-'}\n"
+            f"Feedback prior: {news.get('_feedback_policy') or 'none'}; "
+            f"concrete={'yes' if news.get('_feedback_concrete') else 'no'}; "
+            f"{news.get('_feedback_reason') or '-'}\n"
             f"Текст: {(news.get('body') or '')[:900]}"
         )
         for idx, news in enumerate(batch)
@@ -432,8 +849,8 @@ def _build_prompt(gosb: dict, batch: list[dict]) -> str:
 
 Если новость влияет на конкретную метрику из контекста выше, заполни metric_links. Не придумывай метрики, которых нет в загруженном контексте.
 
-Недавняя обратная связь пользователей:
-{_load_feedback_context()}
+Политика обратной связи пользователей:
+{_load_feedback_context(gosb)}
 
 Новости:
 {news_list}
