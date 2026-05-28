@@ -1211,32 +1211,85 @@ def write_cycle_report(cycle: str, days: int | None = None, update_memory: bool 
     }
 
 
-def _telegram_message(report: dict, summary_path: str) -> str:
+def _clip_text(value: str, max_len: int = 260) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1].rstrip() + "…"
+
+
+def _item_title(item) -> str:
+    if isinstance(item, dict):
+        return str(
+            item.get("title")
+            or item.get("gap")
+            or item.get("hypothesis")
+            or item.get("recommendation")
+            or item.get("action")
+            or item
+        )
+    return str(item)
+
+
+def _telegram_message(report_info: dict) -> str:
+    report = report_info["report"]
+    research = report_info.get("research") or {}
     scope = report["scope"]
-    title = {
-        "daily": "Ежедневная рефлексия",
-        "weekly": "Еженедельная рефлексия",
-        "strategic": "Стратегическая рефлексия",
-    }.get(report["cycle"], "Рефлексия")
+    period = report["period"]
+    title = research.get("title") or "Отчёт агента рефлексии по новостям ГОСБ"
+    if ":" in title:
+        title = title.split(":", 1)[0]
+
     lines = [
-        f"🧭 <b>{escape(title)}</b>",
-        f"<i>{escape(report['period']['start'])} → {escape(report['period']['end'])} UTC</i>",
+        f"🧭 <b>{escape(_clip_text(title, 120))}</b>",
+        f"<i>{escape(period['start'])} → {escape(period['end'])} UTC</i>",
         "",
-        f"Новости: <b>{scope['sent_news']}</b>; инсайты: <b>{scope['insights']}</b>; фидбек: <b>{scope['news_feedback'] + scope['insight_feedback']}</b>",
     ]
-    if report["meta_insights"]:
-        lines.extend(["", "<b>Главные наблюдения</b>"])
-        for item in report["meta_insights"][:5]:
-            lines.append(f"• {escape(item['title'])}")
-    if report["feedback_adjustments"]:
-        lines.extend(["", "<b>Корректировки по фидбеку</b>"])
-        for item in report["feedback_adjustments"][:3]:
-            lines.append(f"• {escape(item['target'])}: {escape(item['recommendation'])}")
-    if report["data_gaps"]:
-        lines.extend(["", "<b>Пробелы данных</b>"])
-        for gap in report["data_gaps"][:3]:
-            lines.append(f"• {escape(gap)}")
-    lines.extend(["", f"Файл отчёта на VPS: <code>{escape(summary_path)}</code>"])
+
+    executive = research.get("executive_summary")
+    if executive:
+        lines.append(escape(_clip_text(executive, 560)))
+        lines.append("")
+
+    lines.extend([
+        "📊 <b>Данные</b>",
+        f"Новости: <b>{scope['sent_news']}</b>; инсайты: <b>{scope['insights']}</b>; "
+        f"реакции: <b>{scope['news_feedback'] + scope['insight_feedback']}</b>; "
+        f"metric links: <b>{scope.get('metric_links', 0)}</b>",
+    ])
+
+    findings = research.get("confirmed_findings") or []
+    if findings:
+        lines.extend(["", "✅ <b>Подтверждённые выводы</b>"])
+        for item in findings[:4]:
+            lines.append(f"• {escape(_clip_text(_item_title(item), 260))}")
+
+    chains = research.get("causal_chains") or []
+    if chains:
+        lines.extend(["", "🔗 <b>Причинные цепочки</b>"])
+        for item in chains[:2]:
+            title_text = _item_title(item)
+            action = item.get("behavior_change") if isinstance(item, dict) else ""
+            joined = f"{title_text}: {action}" if action else title_text
+            lines.append(f"• {escape(_clip_text(joined, 300))}")
+
+    advisories = research.get("advisories") or []
+    if advisories:
+        lines.extend(["", "🎯 <b>Практические советы</b>"])
+        for item in advisories[:3]:
+            title_text = _item_title(item)
+            action = item.get("action") or item.get("recommendation") if isinstance(item, dict) else ""
+            joined = f"{title_text}: {action}" if action else title_text
+            lines.append(f"• {escape(_clip_text(joined, 300))}")
+
+    gaps = research.get("data_gaps") or []
+    if gaps:
+        lines.extend(["", "⚠️ <b>Пробелы данных</b>"])
+        for item in gaps[:2]:
+            lines.append(f"• {escape(_clip_text(_item_title(item), 260))}")
+
+    report_path = report_info.get("report_md_path") or report_info.get("summary_path")
+    lines.extend(["", f"📎 <code>{escape(str(report_path))}</code>"])
     return "\n".join(lines)[:3900]
 
 
@@ -1251,7 +1304,7 @@ def send_cycle_report(report_info: dict) -> bool:
 
     sent = _send_message(
         chat_id,
-        _telegram_message(report_info["report"], report_info["summary_path"]),
+        _telegram_message(report_info),
         thread_id or None,
     )
     print(f"🧭 Отчёт рефлексии отправлен: {sent}")
