@@ -7,9 +7,15 @@
       "name": "Агент отбора релевантности",
       "type": "llm_agent",
       "role": "Оценивает новости для каждого ГОСБа через LLM V2 с учетом региона, источников, холдингов и банковских метрик.",
-      "implementation": "llm_filter_v2.py",
-      "inputs": ["raw_news", "config/holdings.txt", "knowledge_documents"],
-      "outputs": ["filtered_news"],
+      "implementation": "agents/relevance_filter_v2/workspace/llm_filter_v2.py",
+      "inputs": [
+        "raw_news",
+        "config/holdings.txt",
+        "knowledge_documents"
+      ],
+      "outputs": [
+        "filtered_news"
+      ],
       "prompt_source": "llm_filter_v2._build_prompt",
       "enabled": true
     },
@@ -17,12 +23,24 @@
       "id": "reflection_insights_agent",
       "name": "Агент управленческой рефлексии",
       "type": "llm_agent",
-      "role": "Формирует рекомендации и инсайты по отправленным новостям, метрикам, комментариям и базе знаний.",
-      "implementation": "insights.py",
-      "inputs": ["sent_news", "feedback", "knowledge_documents", "metrics"],
-      "outputs": ["insights", "telegram_insight_messages"],
-      "prompt_source": "insights._build_prompt",
-      "enabled": true
+      "role": "Формирует рекомендации, ежедневные отчеты, еженедельные мета-инсайты и стратегические паттерны по отправленным новостям, метрикам, комментариям и базе знаний.",
+      "implementation": "agents/reflection_insights_agent/workspace/insights.py",
+      "inputs": [
+        "sent_news",
+        "feedback",
+        "knowledge_documents",
+        "metrics"
+      ],
+      "outputs": [
+        "insights",
+        "telegram_insight_messages",
+        "reflection_reports",
+        "weekly_meta_insights",
+        "strategic_memory_updates"
+      ],
+      "prompt_source": "insights._build_prompt + reflection_cycles.build_cycle_report",
+      "enabled": true,
+      "cycle_implementation": "agents/reflection_insights_agent/workspace/reflection_cycles.py"
     }
   ]
 }

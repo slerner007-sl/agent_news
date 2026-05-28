@@ -1,5 +1,5 @@
-openclaw_workspace/.openclaw/
-openclaw_workspace/*.json*
+workspace/.openclaw/
+workspace/*.json*
 
 # Runtime/generated files
 __pycache__/
@@ -14,3 +14,11 @@ logs/
 *.bak
 crontab.bak-*
 crontab.v2-filter
+
+# Local / temp artifacts
+.claude/
+temp_radar_design/
+radar-info-main.zip
+bench_*.sh
+*.zip
+node_modules/

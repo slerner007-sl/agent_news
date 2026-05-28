@@ -1,0 +1,257 @@
+{
+  "providers": {
+    "openai-codex": {
+      "baseUrl": "https://chatgpt.com/backend-api",
+      "api": "openai-codex-responses",
+      "models": []
+    },
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "openrouter/auto",
+          "name": "openrouter/auto (Custom Provider)",
+          "contextWindow": 16000,
+          "maxTokens": 4096,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "reasoning": false
+        }
+      ],
+      "apiKey": "<REDACTED_API_KEY>"
+    },
+    "arcee": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "arcee/trinity-mini",
+          "name": "Trinity Mini 26B",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.045,
+            "output": 0.15,
+            "cacheRead": 0.045,
+            "cacheWrite": 0.045
+          },
+          "contextWindow": 131072,
+          "maxTokens": 80000
+        },
+        {
+          "id": "arcee/trinity-large-preview",
+          "name": "Trinity Large Preview",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.25,
+            "output": 1,
+            "cacheRead": 0.25,
+            "cacheWrite": 0.25
+          },
+          "contextWindow": 131072,
+          "maxTokens": 16384
+        },
+        {
+          "id": "arcee/trinity-large-thinking",
+          "name": "Trinity Large Thinking",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0.25,
+            "output": 0.9,
+            "cacheRead": 0.25,
+            "cacheWrite": 0.25
+          },
+          "contextWindow": 262144,
+          "maxTokens": 80000,
+          "compat": {
+            "supportsTools": false,
+            "supportsReasoningEffort": false
+          }
+        }
+      ],
+      "apiKey": "<REDACTED_API_KEY>"
+    },
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "<REDACTED_API_KEY>",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "openai/gpt-4o-mini",
+          "name": "GPT-4o mini",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 16000,
+          "maxTokens": 700,
+          "api": "openai-completions"
+        }
+      ]
+    },
+    "codex": {
+      "baseUrl": "https://chatgpt.com/backend-api",
+      "apiKey": "codex-app-server",
+      "auth": "token",
+      "api": "openai-codex-responses",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+          "api": "openai-codex-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 272000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "supportsUsageInStreaming": true
+          }
+        },
+        {
+          "id": "gpt-5.4",
+          "name": "gpt-5.4",
+          "api": "openai-codex-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 272000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "supportsUsageInStreaming": true
+          }
+        },
+        {
+          "id": "gpt-5.4-mini",
+          "name": "GPT-5.4-Mini",
+          "api": "openai-codex-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 272000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "supportsUsageInStreaming": true
+          }
+        },
+        {
+          "id": "gpt-5.3-codex",
+          "name": "gpt-5.3-codex",
+          "api": "openai-codex-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 272000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "supportsUsageInStreaming": true
+          }
+        },
+        {
+          "id": "gpt-5.3-codex-spark",
+          "name": "GPT-5.3-Codex-Spark",
+          "api": "openai-codex-responses",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 272000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "supportsUsageInStreaming": true
+          }
+        },
+        {
+          "id": "gpt-5.2",
+          "name": "gpt-5.2",
+          "api": "openai-codex-responses",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 272000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "supportsUsageInStreaming": true
+          }
+        }
+      ]
+    }
+  }
+}

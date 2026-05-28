@@ -1,0 +1,325 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-5.5",
+        "fallbacks": []
+      },
+      "workspace": "/home/user1/.openclaw/workspace",
+      "contextTokens": "<REDACTED>",
+      "thinkingDefault": "high",
+      "subagents": {
+        "model": "openai/gpt-5.5",
+        "thinking": "high"
+      },
+      "elevatedDefault": "full",
+      "sandbox": {
+        "mode": "off"
+      },
+      "bootstrapMaxChars": 32000,
+      "compaction": {
+        "reserveTokensFloor": "<REDACTED>"
+      },
+      "maxConcurrent": 1,
+      "models": {
+        "openai/gpt-5.5": {
+          "agentRuntime": {
+            "id": "codex"
+          }
+        },
+        "openai/gpt-5.4": {
+          "agentRuntime": {
+            "id": "codex"
+          }
+        }
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "name": "main",
+        "workspace": "/home/user1/.openclaw/workspace-main",
+        "agentDir": "/home/user1/.openclaw/agents/main/agent",
+        "thinkingDefault": "high",
+        "subagents": {
+          "allowAgents": []
+        },
+        "systemPromptOverride": "Ты главный Telegram-агент ГОСБ-бота. Принимаешь сообщения из рабочих топиков, передаешь детерминированные сценарии плагину и отвечаешь на общие вопросы."
+      },
+      {
+        "id": "relevance_filter_v2",
+        "name": "relevance_filter_v2",
+        "workspace": "/home/user1/.openclaw/workspace-relevance-filter-v2",
+        "agentDir": "/home/user1/.openclaw/agents/relevance_filter_v2/agent",
+        "thinkingDefault": "high",
+        "subagents": {
+          "allowAgents": []
+        },
+        "systemPromptOverride": "Ты LLM-агент отбора релевантности ГОСБ. Отбираешь релевантные новости для каждого ГОСБа через LLM V2 с учетом региона, источников, холдингов, базы знаний и банковских метрик. Рабочая реализация: /home/user1/gosb_bot/src/agent_news/llm_filter_v2.py."
+      },
+      {
+        "id": "reflection_insights_agent",
+        "name": "reflection_insights_agent",
+        "workspace": "/home/user1/.openclaw/workspace-reflection-insights",
+        "agentDir": "/home/user1/.openclaw/agents/reflection_insights_agent/agent",
+        "thinkingDefault": "high",
+        "subagents": {
+          "allowAgents": []
+        },
+        "systemPromptOverride": "Ты LLM-агент управленческой рефлексии ГОСБ. Формируешь рекомендации и инсайты по отправленным новостям, метрикам, комментариям и базе знаний. Рабочая реализация: /home/user1/gosb_bot/src/agent_news/insights.py."
+      }
+    ]
+  },
+  "gateway": {
+    "mode": "local",
+    "auth": "<REDACTED>",
+    "port": 18789,
+    "bind": "loopback",
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "controlUi": {
+      "allowInsecureAuth": true
+    },
+    "nodes": {
+      "denyCommands": [
+        "camera.snap",
+        "camera.clip",
+        "screen.record",
+        "contacts.add",
+        "calendar.add",
+        "reminders.add",
+        "sms.send",
+        "sms.search"
+      ]
+    },
+    "remote": {
+      "token": "<REDACTED>"
+    }
+  },
+  "session": {
+    "dmScope": "main"
+  },
+  "tools": {
+    "profile": "coding"
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "openrouter/auto",
+            "name": "openrouter/auto (Custom Provider)",
+            "contextWindow": 16000,
+            "maxTokens": "<REDACTED>",
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "reasoning": false
+          }
+        ]
+      }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "groups": {
+        "*": {
+          "requireMention": true
+        },
+        "-1003932865226": {
+          "topics": {
+            "2": {
+              "requireMention": false
+            },
+            "130": {
+              "requireMention": false
+            }
+          }
+        }
+      },
+      "botToken": "<REDACTED>",
+      "groupPolicy": "open"
+    }
+  },
+  "wizard": {
+    "lastRunAt": "2026-05-20T11:51:16.730Z",
+    "lastRunVersion": "2026.5.18",
+    "lastRunCommand": "doctor",
+    "lastRunMode": "local"
+  },
+  "meta": {
+    "lastTouchedVersion": "2026.5.22",
+    "lastTouchedAt": "2026-05-24T10:49:56.714Z"
+  },
+  "plugins": {
+    "entries": {
+      "openrouter": {
+        "enabled": true
+      },
+      "openai": {
+        "enabled": true
+      },
+      "codex": {
+        "enabled": true
+      },
+      "gosb-feedback": {
+        "enabled": true
+      }
+    },
+    "load": {
+      "paths": [
+        "/home/user1/gosb_bot/plugins/openclaw-feedback"
+      ]
+    }
+  },
+  "auth": "<REDACTED>",
+  "skills": {
+    "entries": {
+      "1password": "<REDACTED>",
+      "apple-notes": {
+        "enabled": false
+      },
+      "apple-reminders": {
+        "enabled": false
+      },
+      "bear-notes": {
+        "enabled": false
+      },
+      "blogwatcher": {
+        "enabled": false
+      },
+      "blucli": {
+        "enabled": false
+      },
+      "camsnap": {
+        "enabled": false
+      },
+      "clawhub": {
+        "enabled": false
+      },
+      "coding-agent": {
+        "enabled": false
+      },
+      "discord": {
+        "enabled": false
+      },
+      "eightctl": {
+        "enabled": false
+      },
+      "gemini": {
+        "enabled": false
+      },
+      "gh-issues": {
+        "enabled": false
+      },
+      "gifgrep": {
+        "enabled": false
+      },
+      "github": {
+        "enabled": false
+      },
+      "gog": {
+        "enabled": false
+      },
+      "goplaces": {
+        "enabled": false
+      },
+      "himalaya": {
+        "enabled": false
+      },
+      "imsg": {
+        "enabled": false
+      },
+      "mcporter": {
+        "enabled": false
+      },
+      "model-usage": {
+        "enabled": false
+      },
+      "nano-pdf": {
+        "enabled": false
+      },
+      "obsidian": {
+        "enabled": false
+      },
+      "openai-whisper": {
+        "enabled": false
+      },
+      "openai-whisper-api": {
+        "enabled": false
+      },
+      "openhue": {
+        "enabled": false
+      },
+      "oracle": {
+        "enabled": false
+      },
+      "ordercli": {
+        "enabled": false
+      },
+      "peekaboo": {
+        "enabled": false
+      },
+      "sag": {
+        "enabled": false
+      },
+      "session-logs": {
+        "enabled": false
+      },
+      "sherpa-onnx-tts": {
+        "enabled": false
+      },
+      "slack": {
+        "enabled": false
+      },
+      "songsee": {
+        "enabled": false
+      },
+      "sonoscli": {
+        "enabled": false
+      },
+      "spotify-player": {
+        "enabled": false
+      },
+      "summarize": {
+        "enabled": false
+      },
+      "things-mac": {
+        "enabled": false
+      },
+      "trello": {
+        "enabled": false
+      },
+      "video-frames": {
+        "enabled": false
+      },
+      "voice-call": {
+        "enabled": false
+      },
+      "wacli": {
+        "enabled": false
+      },
+      "xurl": {
+        "enabled": false
+      }
+    }
+  },
+  "messages": {
+    "groupChat": {
+      "unmentionedInbound": "room_event"
+    }
+  }
+}

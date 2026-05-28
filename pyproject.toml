@@ -1,0 +1,16 @@
+[project]
+name = "agent-news"
+version = "0.1.0"
+description = "GOSB news assistant with OpenClaw filtering and Telegram delivery."
+requires-python = ">=3.10"
+dependencies = [
+  "feedparser",
+  "Pillow",
+  "python-telegram-bot",
+  "requests",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+

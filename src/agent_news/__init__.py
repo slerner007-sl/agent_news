@@ -1,0 +1,2 @@
+"""GOSB news assistant package."""
+

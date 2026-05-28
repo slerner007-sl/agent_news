@@ -1,0 +1,111 @@
+"""
+llm_filter.py — фильтрация новостей через OpenRouter
+"""
+
+import json
+import requests
+from db import get_conn, get_active_gosbs, get_unsent_news, mark_as_sent
+
+OPENROUTER_KEY = "<REDACTED_API_KEY>"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+MODEL = "openai/gpt-4o-mini"  # дёшево и быстро для фильтрации
+
+
+def filter_news_for_gosb(gosb: dict, news_items: list) -> list:
+    """Один LLM-вызов на весь список новостей для одного ГОСБа."""
+    if not news_items:
+        return []
+
+    # Keyword pre-filter — бесплатно, сокращает список перед LLM
+    import json as _json
+    keywords = _json.loads(gosb["keywords"])
+    candidates = [
+        n for n in news_items
+        if any(kw.lower() in (n["title"] + " " + (n["body"] or "")).lower()
+               for kw in keywords)
+    ]
+
+    if not candidates:
+        print(f"  ℹ️  После keyword-фильтра: 0 кандидатов")
+        return []
+
+    print(f"  📋 Keyword-фильтр: {len(news_items)} → {len(candidates)} кандидатов")
+
+    # Формируем список для LLM
+    news_list = "\n".join([
+        f"[{i}] {n['title']}"
+        for i, n in enumerate(candidates)
+    ])
+
+    prompt = f"""{gosb['system_prompt']}
+
+Вот список новостей:
+{news_list}
+
+Ответь ТОЛЬКО валидным JSON, без markdown:
+{{"relevant": [{{"index": 0, "summary": "..."}}]}}"""
+
+    try:
+        response = requests.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1000,
+                "temperature": 0.1,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+
+        # Чистим на случай если LLM добавил markdown
+        content = content.strip().replace("```json", "").replace("```", "").strip()
+        result = json.loads(content)
+
+        relevant = []
+        for item in result.get("relevant", []):
+            idx = item["index"]
+            if 0 <= idx < len(candidates):
+                relevant.append({
+                    "news": candidates[idx],
+                    "summary": item["summary"],
+                })
+
+        print(f"  ✅ LLM отобрал: {len(relevant)} релевантных")
+        return relevant
+
+    except Exception as e:
+        print(f"  ❌ Ошибка LLM: {e}")
+        return []
+
+
+def run_filter():
+    """Запускает фильтрацию для всех активных ГОСБов."""
+    gosbs = get_active_gosbs()
+    print(f"🔍 Фильтруем новости для {len(gosbs)} ГОСБов...\n")
+
+    for gosb in gosbs:
+        print(f"📍 {gosb['name']}")
+        news_items = get_unsent_news(gosb["id"], since_hours=24)
+        news_items = [dict(n) for n in news_items]
+        print(f"  📰 Новостей за 24ч: {len(news_items)}")
+
+        relevant = filter_news_for_gosb(gosb, news_items)
+
+        # Сохраняем в sent_news
+        for item in relevant:
+            mark_as_sent(gosb["id"], item["news"]["id"], item["summary"])
+
+        print()
+
+    print("✅ Фильтрация завершена")
+    return True
+
+
+if __name__ == "__main__":
+    run_filter()

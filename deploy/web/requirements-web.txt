@@ -1,0 +1,5 @@
+# Runtime deps for the agent-news web API.
+# Keep this minimal — the existing cron/bot pipelines stay untouched.
+fastapi>=0.110,<0.116
+uvicorn[standard]>=0.27,<0.32
+python-multipart>=0.0.7,<0.1

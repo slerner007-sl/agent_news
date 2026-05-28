@@ -1,0 +1,23 @@
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+COPY deploy/web/requirements-web.txt /tmp/requirements-web.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-web.txt
+
+# Only the runtime python package is needed at build time. The SQLite
+# database lives outside the image and is mounted at runtime so the web
+# API stays in sync with the cron pipeline.
+COPY src/ /app/src/
+
+ENV PYTHONPATH=/app/src \
+    AGENT_NEWS_WEB_HOST=0.0.0.0 \
+    AGENT_NEWS_WEB_PORT=8765
+
+EXPOSE 8765
+
+CMD ["python", "-m", "agent_news.web"]
