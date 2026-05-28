@@ -152,6 +152,37 @@ export interface ChatResponse {
   duration_seconds: number;
 }
 
+export interface ReflectionReportSummary {
+  id: string;
+  cycle: string;
+  generated_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  news_count: number;
+  insights_count: number;
+  feedback_count: number;
+  has_report: boolean;
+}
+
+export interface ReflectionReportDetail {
+  id: string;
+  cycle: string;
+  generated_at: string | null;
+  period: Record<string, any> | null;
+  scope: Record<string, any> | null;
+  report_md: string | null;
+  summary_md: string | null;
+  meta_insights: any[];
+  feedback_adjustments: any[];
+  strategic_patterns: any[];
+  data_gaps: any[];
+  causal_chains: any[];
+  confirmed_findings: any[];
+  rejected_hypotheses: any[];
+  task_candidates: any[];
+  knowledge_health: Record<string, any> | null;
+}
+
 export const api = {
   health: () => client.get('/health').then((r) => r.data),
 
@@ -211,6 +242,12 @@ export const api = {
 
   sendChat: (message: string) =>
     client.post<ChatResponse>('/api/v1/chat', { message }, { timeout: 300_000 }).then((r) => r.data),
+
+  listReflectionReports: () =>
+    client.get<ReflectionReportSummary[]>('/api/v1/reports/reflection').then((r) => r.data),
+
+  getReflectionReport: (id: string) =>
+    client.get<ReflectionReportDetail>(`/api/v1/reports/reflection/${id}`).then((r) => r.data),
 };
 
 export default client;

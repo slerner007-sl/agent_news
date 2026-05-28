@@ -64,6 +64,8 @@ async def chat(body: ChatRequest, username: str = Depends(require_auth)):
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Пустое сообщение")
 
+    env = {**os.environ, "HOME": os.path.expanduser("~")}
+
     async with _semaphore:
         t0 = time.monotonic()
         try:
@@ -76,6 +78,7 @@ async def chat(body: ChatRequest, username: str = Depends(require_auth)):
                 "--timeout", str(OPENCLAW_TIMEOUT),
                 "--json",
                 cwd=str(PROJECT_ROOT),
+                env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -84,7 +87,14 @@ async def chat(body: ChatRequest, username: str = Depends(require_auth)):
                 timeout=OPENCLAW_TIMEOUT + 30,
             )
         except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Таймаут ответа от агента")
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    "Таймаут ответа от агента. "
+                    "Возможно, OpenClaw Gateway перегружен или требует перезапуск. "
+                    "Попробуйте позже или проверьте: systemctl --user status openclaw-gateway"
+                ),
+            )
         except FileNotFoundError:
             raise HTTPException(
                 status_code=503,
@@ -96,7 +106,19 @@ async def chat(body: ChatRequest, username: str = Depends(require_auth)):
         stderr = stderr_bytes.decode("utf-8", errors="replace")
 
         if proc.returncode != 0:
-            detail = (stderr or stdout).strip()[:500] or f"openclaw exited with {proc.returncode}"
+            raw = (stderr or stdout).strip()
+            if "scope upgrade" in raw or "pairing required" in raw:
+                detail = (
+                    "OpenClaw Gateway требует повторную авторизацию устройства. "
+                    "Выполните на сервере: openclaw devices approve --latest --token <gateway-token>"
+                )
+            elif "codex app-server" in raw:
+                detail = (
+                    "OpenClaw agent runtime не запустился. "
+                    "Попробуйте: systemctl --user restart openclaw-gateway"
+                )
+            else:
+                detail = raw[:500] or f"openclaw exited with {proc.returncode}"
             raise HTTPException(status_code=502, detail=detail)
 
         try:

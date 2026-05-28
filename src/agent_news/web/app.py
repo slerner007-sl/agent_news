@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .. import db as _db
-from .routes import chat, events, feedback, gosbs, insights, knowledge, news, stats
+from .routes import chat, events, feedback, gosbs, insights, knowledge, news, reports, stats
 
 
 def _cors_origins() -> list[str]:
@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for module in (news, insights, gosbs, feedback, knowledge, stats, events, chat):
+    for module in (news, insights, gosbs, feedback, knowledge, stats, events, chat, reports):
         app.include_router(module.router, prefix="/api/v1")
 
     @app.get("/health")
