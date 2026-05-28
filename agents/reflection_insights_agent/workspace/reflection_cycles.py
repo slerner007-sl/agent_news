@@ -1288,10 +1288,52 @@ def _telegram_message(report_info: dict) -> str:
         for item in gaps[:2]:
             lines.append(f"• {escape(_clip_text(_item_title(item), 260))}")
 
-    report_path = report_info.get("report_md_path") or report_info.get("summary_path")
-    lines.extend(["", f"📎 <code>{escape(str(report_path))}</code>"])
-    return "\n".join(lines)[:3900]
+    lines.extend(["", "📎 Полный <b>report.md</b> прикреплён следующим сообщением."])
+    return "\n".join(lines)[:3200]
 
+
+
+def _send_report_document(chat_id: str, thread_id: str | None, report_info: dict) -> bool:
+    report_path = Path(report_info.get("report_md_path") or report_info.get("summary_path") or "")
+    if not report_path.exists():
+        print(f"🧭 Файл отчёта не найден для отправки: {report_path}")
+        return False
+
+    import requests
+    from agent_news.sender import TG_URL, SEND_MAX_RETRIES, _retry_after
+    import time
+
+    caption = "📎 Полный отчёт агента рефлексии по новостям ГОСБ"
+    payload = {
+        "chat_id": chat_id,
+        "caption": caption,
+        "parse_mode": "HTML",
+    }
+    if thread_id:
+        payload["message_thread_id"] = int(thread_id)
+
+    for attempt in range(1, SEND_MAX_RETRIES + 1):
+        try:
+            with report_path.open("rb") as fh:
+                response = requests.post(
+                    f"{TG_URL}/sendDocument",
+                    data=payload,
+                    files={"document": (report_path.name, fh, "text/markdown")},
+                    timeout=30,
+                )
+            if response.status_code == 429:
+                wait_seconds = _retry_after(response) + 1
+                print(f"  ⏳ Telegram rate limit на документ: жду {wait_seconds} сек. (попытка {attempt})")
+                time.sleep(wait_seconds)
+                continue
+            response.raise_for_status()
+            return True
+        except Exception as exc:
+            if attempt >= SEND_MAX_RETRIES:
+                print(f"❌ Ошибка отправки отчёта-файла: {exc}")
+                return False
+            time.sleep(2 * attempt)
+    return False
 
 def send_cycle_report(report_info: dict) -> bool:
     chat_id = os.getenv("REFLECTION_REPORT_CHAT_ID", "").strip() or os.getenv("INSIGHTS_CHAT_ID", "").strip()
@@ -1307,8 +1349,11 @@ def send_cycle_report(report_info: dict) -> bool:
         _telegram_message(report_info),
         thread_id or None,
     )
-    print(f"🧭 Отчёт рефлексии отправлен: {sent}")
-    return sent
+    document_sent = False
+    if sent:
+        document_sent = _send_report_document(chat_id, thread_id or None, report_info)
+    print(f"🧭 Отчёт рефлексии отправлен: message={sent}, document={document_sent}")
+    return bool(sent and document_sent)
 
 
 def run_cycle(cycle: str, days: int | None = None, send: bool = False, update_memory: bool | None = None, disable_llm: bool = False) -> dict:
