@@ -10,7 +10,7 @@ import {
   BulbOutlined,
   MessageOutlined,
 } from '@ant-design/icons';
-import { api, Gosb, KnowledgeItem, StatsSummary } from '../api/client';
+import { api, Gosb, StatsSummary } from '../api/client';
 
 const { Text } = Typography;
 
@@ -97,8 +97,6 @@ export default function AgentStructurePage() {
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [stats, setStats] = useState<StatsSummary | null>(null);
   const [gosbs, setGosbs] = useState<Gosb[]>([]);
-  const [knowledge, setKnowledge] = useState<KnowledgeItem[]>([]);
-  const [knowledgeExpanded, setKnowledgeExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,13 +105,11 @@ export default function AgentStructurePage() {
       api.health().catch(() => null),
       api.stats(720).catch(() => null),
       api.listGosbs().then((r) => r.items).catch(() => []),
-      api.listKnowledge({ limit: 50 }).then((r) => r.items).catch(() => []),
     ])
-      .then(([h, s, g, k]) => {
+      .then(([h, s, g]) => {
         setHealth(h);
         setStats(s);
         setGosbs(g);
-        setKnowledge(k);
       })
       .catch((err) => setError(err?.message || 'Ошибка'))
       .finally(() => setLoading(false));
@@ -336,143 +332,6 @@ export default function AgentStructurePage() {
             </tbody>
           </table>
         </div>
-      </div>
-
-      {/* Knowledge graph */}
-      <div style={{ marginBottom: 24 }}>
-        <div
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, cursor: 'pointer' }}
-          onClick={() => setKnowledgeExpanded(!knowledgeExpanded)}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <BookOutlined style={{ fontSize: 18, color: '#f59e0b' }} />
-            <Text style={{ fontSize: 17, fontWeight: 600, color: '#1d1d1f' }}>Граф знаний</Text>
-            {stats && (
-              <Tag style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', color: '#f59e0b', borderRadius: 8, fontWeight: 500, margin: 0 }}>
-                {stats.totals.knowledge_total} документов
-              </Tag>
-            )}
-          </div>
-          <Text style={{ color: '#007aff', fontWeight: 500, fontSize: 14 }}>
-            {knowledgeExpanded ? 'Свернуть' : 'Развернуть'}
-          </Text>
-        </div>
-
-        {/* Mini graph visualization - always visible */}
-        <div
-          style={{
-            background: '#ffffff',
-            borderRadius: 16,
-            border: '1px solid rgba(245, 158, 11, 0.2)',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-            padding: 24,
-            position: 'relative',
-            minHeight: 140,
-            overflow: 'hidden',
-          }}
-        >
-          {/* Graph nodes */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', position: 'relative' }}>
-            {/* Central node */}
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{
-                width: 80, height: 80, borderRadius: '50%',
-                background: 'linear-gradient(135deg, rgba(0, 122, 255, 0.15), rgba(0, 122, 255, 0.05))',
-                border: '2px solid rgba(0, 122, 255, 0.3)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
-                zIndex: 2,
-              }}>
-                <RobotOutlined style={{ fontSize: 22, color: '#007aff' }} />
-                <Text style={{ fontSize: 10, color: '#007aff', fontWeight: 600 }}>Агент</Text>
-              </div>
-            </div>
-
-            {/* Edges + satellite nodes */}
-            {[
-              { label: 'Метрики', count: knowledge.filter(k => k.kind === 'metrics').length, color: '#f59e0b', angle: -60 },
-              { label: 'Методологии', count: knowledge.filter(k => k.kind === 'methodology').length, color: '#8b5cf6', angle: 0 },
-              { label: 'ГОСБ', count: gosbs.length, color: '#007aff', angle: 60 },
-              { label: 'Инсайты', count: stats?.totals.insights_total || 0, color: '#34c759', angle: 120 },
-              { label: 'Обр. связь', count: stats?.totals.feedback_total || 0, color: '#ff3b30', angle: 180 },
-              { label: 'Новости', count: stats?.totals.news_total || 0, color: '#3b82f6', angle: 240 },
-            ].map((node, i) => (
-              <div key={i} style={{
-                position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center',
-                margin: '0 16px',
-              }}>
-                <div style={{
-                  width: 56, height: 56, borderRadius: '50%',
-                  background: `${node.color}15`, border: `2px solid ${node.color}40`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
-                }}>
-                  <Text style={{ fontSize: 14, fontWeight: 700, color: node.color }}>{node.count}</Text>
-                </div>
-                <Text style={{ fontSize: 10, color: '#86868b', fontWeight: 500, marginTop: 4, textAlign: 'center' }}>{node.label}</Text>
-              </div>
-            ))}
-          </div>
-
-          {/* Connection lines hint */}
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.1, pointerEvents: 'none' }}>
-            <svg width="100%" height="100%" style={{ position: 'absolute' }}>
-              <line x1="50%" y1="50%" x2="15%" y2="30%" stroke="#007aff" strokeWidth="1" />
-              <line x1="50%" y1="50%" x2="30%" y2="70%" stroke="#f59e0b" strokeWidth="1" />
-              <line x1="50%" y1="50%" x2="70%" y2="30%" stroke="#34c759" strokeWidth="1" />
-              <line x1="50%" y1="50%" x2="85%" y2="50%" stroke="#8b5cf6" strokeWidth="1" />
-            </svg>
-          </div>
-        </div>
-
-        {/* Expanded knowledge list */}
-        {knowledgeExpanded && knowledge.length > 0 && (
-          <div style={{
-            background: '#ffffff', borderRadius: 16, border: '1px solid rgba(0, 0, 0, 0.08)',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', overflow: 'hidden', marginTop: 12,
-          }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-              <thead>
-                <tr>
-                  {['ID', 'Тип', 'Файл', 'Источник', 'Версия', 'Дата'].map((h) => (
-                    <th key={h} style={{ textAlign: 'left', padding: '12px 16px', color: '#86868b', fontWeight: 600, fontSize: 13, borderBottom: '1px solid rgba(0, 0, 0, 0.08)' }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {knowledge.map((k) => (
-                  <tr
-                    key={k.id}
-                    style={{ transition: 'background 0.15s' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.04)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    <td style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0, 0, 0, 0.04)', color: '#007aff', fontWeight: 500 }}>#{k.id}</td>
-                    <td style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0, 0, 0, 0.04)' }}>
-                      <Tag style={{
-                        background: k.kind === 'metrics' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(139, 92, 246, 0.1)',
-                        border: `1px solid ${k.kind === 'metrics' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(139, 92, 246, 0.2)'}`,
-                        color: k.kind === 'metrics' ? '#f59e0b' : '#8b5cf6',
-                        borderRadius: 6, fontWeight: 500, margin: 0, fontSize: 12,
-                      }}>
-                        {k.kind}
-                      </Tag>
-                    </td>
-                    <td style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0, 0, 0, 0.04)', color: '#1d1d1f', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {k.file_name || '—'}
-                    </td>
-                    <td style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0, 0, 0, 0.04)', color: '#86868b' }}>{k.source_type}</td>
-                    <td style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0, 0, 0, 0.04)', color: '#86868b' }}>v{k.revision}</td>
-                    <td style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0, 0, 0, 0.04)', color: '#86868b', fontSize: 12 }}>{k.created_at?.slice(0, 16)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {knowledgeExpanded && knowledge.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 24, color: '#86868b', marginTop: 12 }}>Документов в базе знаний нет.</div>
-        )}
       </div>
 
       {/* ГОСБ coverage */}

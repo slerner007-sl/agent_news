@@ -64,7 +64,12 @@ export default function AppHeader({ healthStatus = 'unknown' }: AppHeaderProps) 
       icon: <RobotOutlined />,
       label: 'Агент',
       children: [
-        { key: 'agent-chat', icon: <MessageOutlined />, label: 'Чат с агентом', onClick: () => navigate('/agent/chat') },
+        {
+          key: 'agent-chat',
+          icon: <MessageOutlined />,
+          label: <Tooltip title="Скоро"><span style={{ color: 'rgba(0, 0, 0, 0.25)' }}>Чат с агентом</span></Tooltip>,
+          disabled: true,
+        },
         { key: 'agent-structure', icon: <ApartmentOutlined />, label: 'Структура агента', onClick: () => navigate('/agent/structure') },
       ],
     },
