@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import os
+import shutil
 import sys
 import tempfile
 
@@ -46,6 +48,9 @@ with db.get_conn() as conn:
     """)
 
 from agent_news import insights
+
+report_dir = Path(path).with_suffix("") / "reports"
+insights.REPORTS_DIR = report_dir
 
 calls = []
 
@@ -102,6 +107,18 @@ assert insight_rows[0]["priority"] == "high"
 assert news_links == 1
 assert metric_links == 1
 
+report_json = report_dir / "run-1" / "insights.json"
+report_summary = report_dir / "run-1" / "summary.md"
+report_journal = report_dir / "run-1" / "journal.md"
+assert report_json.exists()
+assert report_summary.exists()
+assert report_journal.exists()
+report_data = json.loads(report_json.read_text())
+assert report_data["run_id"] == "run-1"
+assert len(report_data["insights"]) == 1
+assert report_data["scope"]["sent_news_total"] == 2
+assert report_data["not_promoted_to_insight"][0]["title"] == "Городская афиша на выходные"
+
 messages = []
 
 
@@ -134,4 +151,5 @@ assert "Самарский ГОСБ" in messages[0][1]
 assert messages[1][3]["inline_keyboard"][0][2]["callback_data"] == "icomment:1"
 
 Path(path).unlink(missing_ok=True)
+shutil.rmtree(report_dir.parent, ignore_errors=True)
 print("insights ok")

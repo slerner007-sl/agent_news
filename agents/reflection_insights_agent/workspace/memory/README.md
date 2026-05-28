@@ -1,3 +1,3 @@
 # Memory
 
-Store durable reflection lessons here: accepted/rejected recommendation patterns, useful metric links, and recurring expert feedback themes.
+Store durable reflection lessons here: accepted/rejected recommendation patterns, useful metric links, recurring expert feedback themes, and follow-up notes from generated reports.
