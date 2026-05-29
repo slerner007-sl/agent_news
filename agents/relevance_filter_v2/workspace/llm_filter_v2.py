@@ -34,6 +34,7 @@ from agent_news.db import (
 )
 from agent_news.llm_filter import OPENCLAW_MODEL, _openclaw_json
 from agent_news.holdings_loader import holding_terms_for_gosb, holdings_display_for_gosb
+from agent_news.region_context import get_region_context_for_gosb
 
 BATCH_SIZE = int(os.getenv("NEWS_V2_BATCH_SIZE", "20"))
 MAX_ITEMS = int(os.getenv("NEWS_V2_MAX_ITEMS", "0"))
@@ -828,6 +829,9 @@ def _build_prompt(gosb: dict, batch: list[dict]) -> str:
 Регион/территория ГОСБа: {gosb.get('region') or '-'}.
 Локальные ориентиры из конфига: {_keywords_display(gosb)}.
 Закрепленные клиентские холдинги этого ГОСБа: {holdings_display_for_gosb(gosb['name'])}.
+
+Региональный экономический контекст из документов:
+{get_region_context_for_gosb(gosb, max_chars=2600)}
 
 Считать релевантным:
 - новости о закрепленных клиентских холдингах этого ГОСБа: сделки, стройки, инвестиции, производство, суды, банкротства, проверки, собственники, расширение/сокращение бизнеса;

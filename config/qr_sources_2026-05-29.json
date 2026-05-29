@@ -1,0 +1,101 @@
+{
+  "source_documents": [
+    "Ленинградская обл.pdf",
+    "Самара.pdf",
+    "Калининград.pdf",
+    "Ульяновск.pdf"
+  ],
+  "extracted_at": "2026-05-29",
+  "regions": {
+    "Ленинградская область": {
+      "business": [
+        "https://www.gorodn.ru/razdel/novosti_kompaniy/situatsiya_na_krupnykh_donskikh_predpriyatiyakh/shakhtinskiy-poliefirnyy-zavod-utroil-prodazhi/",
+        "https://www.xn--90aifddrld7a.xn--p1ai/news/country/kachestvennyy-rost-i-adaptatsiya-msp-k-novym-usloviyam-stali-glavnymi-temami-vi-vserossiyskogo-forum",
+        "https://www.xn--90aifddrld7a.xn--p1ai/news/country/maksim-reshetnikov-oboznachil-rol-msp-v-strukturnykh-preobrazovaniyakh-ekonomiki/"
+      ],
+      "salary_payroll": [
+        "https://www.kommersant.ru/doc/8478121",
+        "https://www.spbdnevnik.ru/news/2026-04-03/stala-izvestna-srednyaya-zarplata-rabotnika-v-peterburge-i-lenoblasti"
+      ],
+      "real_estate": [
+        "https://www.t.me/s/realty_rbc/7687",
+        "https://www.t.me/s/realty_rbc/7783",
+        "https://www.t.me/s/ria_realty/17863",
+        "https://www.t.me/s/domresearch/787"
+      ],
+      "tourism": [
+        "https://travel.yandex.ru/pro/dinamika-i-trendy-turisticheskogo-sprosa-v-sanktpeterburge-i-lenoblasti/",
+        "https://www.newprospect.ru/news/vsesezon-2026-investiczii-v-turizm-igra-vdolguyu-vyigodnaya-dlya-vsex",
+        "https://www.travelvesti.ru/news/vsesezon-2026-investitsii-v-turizm-igra-vdolguyu-vygodnaya-dlya-vsekh.html"
+      ]
+    },
+    "Самарская область": {
+      "business": [
+        "http://www.chelno-vershini.ru/%D0%BF%D0%BE%D1%81%D0%B5%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5/%D0%BD%D0%BE%D0%B2%D0%BE%D1%81%D1%82%D0%B8-%D0%B4%D0%BB%D1%8F-%D0%BF%D1%80%D0%B5%D0%B4%D0%BF%D1%80%D0%B8%D0%BD%D0%B8%D0%BC%D0%B0%D1%82%D0%B5%D0%BB%D0%B5%D0%B9",
+        "https://www.volga.news/article/787897.html"
+      ],
+      "salary_payroll": [
+        "https://www.dzen.ru/a/aQ3rWkX4ei200EMV",
+        "https://www.vk.com/wall-127283802_3636367",
+        "https://www.vk.com/wall-2579489_2644136"
+      ],
+      "real_estate": [
+        "https://realty.rbc.ru/news/69e89a839a7947bf08e8cd8a",
+        "https://www.t.me/s/realty_rbc/7747",
+        "https://www.t.me/s/realty_rbc/7838",
+        "https://www.citytraffic.ru/2025/12/399682/v-samarskoi-oblasti-ytverdili-srednuu-ri"
+      ],
+      "tourism": [
+        "https://www.kommersant.ru/doc/8511746",
+        "https://www.sgubern.ru/news/17182/",
+        "https://www.xn--80aapampemcchfmo7a3c9ehj.xn--p1ai/news/v-samarskoy-oblasti-v-2025-godu-otdokhnuli-bolee-3-mln-turistov/"
+      ]
+    },
+    "Калининградская область": {
+      "business": [
+        "https://www.banki.ru/news/daytheme/?id=11022045",
+        "https://www.globalperm.ru/firmnews/id/10353",
+        "https://www.klops.ru/kaliningrad/2025-10-03/368517-v-kaliningradskoy-oblasti-70-malogo-biznesa-stolknyotsya-s-rostom-nalogov-s-2026-goda-ekspert"
+      ],
+      "salary_payroll": [
+        "https://www.kaliningradtoday.ru/economics/07205527/",
+        "https://www.kaliningradtv.ru/news/31088",
+        "https://www.ruwest.ru/news/157074/"
+      ],
+      "real_estate": [
+        "https://realty.rbc.ru/news/69e89a839a7947bf08e8cd8a?from=newsfeed",
+        "https://www.abn.agency/2026/04/21/ipoteka-v-marte-uskorilas-kaliningradczy-vzyali-kreditov-na-zhilyo-na-55-bolshe-chem-v-fevrale/",
+        "https://www.t.me/s/ria_realty/17950",
+        "https://marketing.rbc.ru/research/53322/",
+        "https://www.t.me/s/ria_realty/18067"
+      ],
+      "tourism": [
+        "https://www.balticnews.ru/?news=110603-turisticheskiy-spad-spros-na-kaliningrad-v-2025-m-poshel-na-ubyl",
+        "https://www.kaliningradtoday.ru/economics/26203971/",
+        "https://www.vedomosti.ru/tourism/route/articles/2026/01/28/1172337-zamki-more-i-dyuni-baltiiskii-eksklav-menyaet-predstavleniya-o-rossiiskom-otdihe"
+      ]
+    },
+    "Ульяновская область": {
+      "business": [
+        "https://ul.kp.ru/online/news/6935051/",
+        "https://www.globalperm.ru/firmnews/id/10353"
+      ],
+      "salary_payroll": [
+        "https://ul.kp.ru/online/news/6927374/",
+        "https://www.kommersant.ru/doc/8119637",
+        "https://www.ulpressa.ru/2026/04/17/inzheneram-do-170-tysyach-v-ulyanovskoj-oblasti-rezko-vyrosli-zarplaty-v-stroitelstve/"
+      ],
+      "real_estate": [
+        "https://www.t.me/s/belaya_kaska/35135",
+        "https://www.t.me/s/ria_realty/17955",
+        "https://www.ulpressa.ru/2026/01/14/dvizhenie-vverh-chto-budet-s-czenami-na-zhile-v-2026-godu-v-ulyanovskoj-oblasti/",
+        "https://www.consultant.ru/law/review/reg/rlaw/rlaw0762026-03-06.html"
+      ],
+      "tourism": [
+        "https://ul.kp.ru/online/news/6260757/",
+        "https://ulgov.gosuslugi.ru/news/blagodarya-realizaczii-naczproekta-turizm-i-gostepriimstvo-ulyanovskaya-oblast-po-itogam-2025-voshla-v-pyatyorku-liderov-zelyonogo-rejtinga-razvitiya-turizma/",
+        "https://www.ulyanovsk.express/novosti/turizm/578-8-tys-turistov-za-10-mesyatsev-ulyanovskaya-oblast-podvodit-itogi-2025-goda-248115/"
+      ]
+    }
+  }
+}

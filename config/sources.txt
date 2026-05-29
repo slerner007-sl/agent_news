@@ -25,6 +25,8 @@ telegram:Online47|online47news
 # Калининградская область
 rss:Калининградская область — Правительство|https://gov39.ru/press/rss/|https://gov39.ru
 rss:Новый Калининград|https://www.newkaliningrad.ru/news/rss.xml|https://www.newkaliningrad.ru
+rss:KaliningradToday|https://kaliningradtoday.ru/feed/|https://kaliningradtoday.ru
+rss:Калининград ТВ|https://kaliningradtv.ru/rss/|https://kaliningradtv.ru
 telegram:Беспрозванных. Калининград|besprozvannih
 telegram:Правительство Калининградской области|government_kgd
 telegram:Клопс|klops_news
@@ -33,7 +35,14 @@ telegram:Калининград.Ru|kaliningradru
 
 # Ульяновская область
 rss:УЛПРЕССА|https://ulpressa.ru/feed/|https://ulpressa.ru
+rss:УлПравда|https://ulpravda.ru/feed.xml|https://ulpravda.ru
+rss:Ульяновск Экспресс|https://ulyanovsk.express/feed/|https://ulyanovsk.express
 telegram:Ульяновская область|ulgovru
 telegram:Ulpravda.ru|ulpravda
 telegram:УЛПРЕССА|ulpressa
 
+# Тематические источники из QR-кодов региональных материалов
+telegram:РБК Недвижимость|realty_rbc
+telegram:РИА Недвижимость|ria_realty
+telegram:ДОМ.РФ Research|domresearch
+telegram:Белая каска|belaya_kaska

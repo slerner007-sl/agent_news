@@ -32,6 +32,7 @@ from agent_news.db import (
 )
 from agent_news.holdings_loader import holdings_display_for_gosb
 from agent_news.llm_filter import _openclaw_json
+from agent_news.region_context import get_region_context_for_gosb
 
 
 INSIGHT_TYPES = {
@@ -806,6 +807,9 @@ def _build_prompt(gosb: dict, batch: list[dict], recent_context: str = "") -> st
 
 Регион ГОСБа: {gosb.get('region') or '-'}.
 Закрепленные клиентские холдинги: {holdings_display_for_gosb(gosb['name'])}.
+
+Региональный экономический контекст из документов:
+{get_region_context_for_gosb(gosb, max_chars=2400)}
 
 Контекст прошлых дней для поиска повторов и трендов, не для механического копирования:
 {recent_context or '-'}
